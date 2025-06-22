@@ -1,0 +1,169 @@
+import axios from 'axios';
+
+// Creating an axios instance with default configuration
+const api = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+// API service with methods for all backend communication
+const apiService = {
+  // Auth token management
+  setAuthHeader: (token) => {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  },
+  
+  clearAuthHeader: () => {
+    delete api.defaults.headers.common['Authorization'];
+  },
+  
+  // Authentication endpoints
+  login: (credentials) => {
+    return api.post('/auth/login', credentials);
+  },
+  
+  register: (userData) => {
+    return api.post('/auth/register', userData);
+  },
+  
+  refreshToken: () => {
+    return api.post('/auth/refresh');
+  },
+  
+  validateToken: () => {
+    return api.get('/auth/validate');
+  },
+  
+  // Scan upload and analysis
+  uploadScan: (formData, onProgress) => {
+    return api.post('/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: onProgress ? (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        onProgress(percentCompleted);
+      } : undefined
+    });
+  },
+  
+  getJobStatus: (jobId) => {
+    return api.get(`/status/${jobId}`);
+  },
+  
+  getResults: (jobId) => {
+    return api.get(`/results/${jobId}`);
+  },
+  
+  // User profile and history
+  getUserProfile: () => {
+    return api.get('/user/profile');
+  },
+  
+  updateUserProfile: (profileData) => {
+    return api.put('/user/profile', profileData);
+  },
+  
+  getScanHistory: () => {
+    return api.get('/user/scans');
+  },
+  
+  deleteScan: (scanId) => {
+    return api.delete(`/user/scans/${scanId}`);
+  },
+  
+  // Export results handling
+  exportResultsCSV: (jobId) => {
+    return api.get(`/export/csv/${jobId}`, {
+      responseType: 'blob'
+    });
+  },
+  
+  exportResultsPDF: (jobId) => {
+    return api.get(`/export/pdf/${jobId}`, {
+      responseType: 'blob'
+    });
+  },
+  
+  filterScans: (filters = {}) => {
+    return api.get('/user/scans/filter', { params: filters });
+  },
+  
+  // Visualization endpoints with customization options
+  getVisualizationUrl: (jobId, options = {}) => {
+    const {
+      type = 'slice',              // 'slice', 'multi-slice', 'projection', 'lesions'
+      quality = 'high',            // 'high', 'standard'
+      slice = null,                // slice index (null = middle slice)
+      numSlices = 5,               // for multi-slice view
+      upscale = 1.2,               // upscaling factor for high-res visualizations
+      enhanceContrast = true,      // contrast enhancement
+      enhanceEdges = true          // edge enhancement
+    } = options;
+    
+    const params = { 
+      quality, 
+      upscale, 
+      enhance_contrast: enhanceContrast, 
+      enhance_edges: enhanceEdges,
+      type // Use 'type' as parameter name to match backend expectation
+    };
+    
+    // Add conditional parameters
+    if (slice !== null) params.slice_idx = slice;
+    if (type === 'multi-slice') params.num_slices = numSlices;
+    
+    // Build the URL with query parameters
+    const queryString = Object.keys(params)
+      .map(key => `${key}=${params[key]}`)
+      .join('&');
+    
+    // Use advanced-visualization endpoint for high quality images
+    const endpoint = quality === 'high' ? 'advanced-visualization' : 'visualization';
+    
+    // Return full URL string for direct use in img src attribute
+    return `/${endpoint}/${jobId}?${queryString}`;
+  },
+
+  // High resolution data visualization (for direct API calls)
+  getVisualization: (jobId, options = {}) => {
+    const {
+      type = 'slice',
+      quality = 'high',
+      slice = null,
+      numSlices = 5
+    } = options;
+    
+    const params = { 
+      type,
+      quality
+    };
+    
+    if (slice !== null) params.slice_idx = slice;
+    if (type === 'multi-slice') params.num_slices = numSlices;
+    
+    const endpoint = quality === 'high' ? 'advanced-visualization' : 'visualization';
+    return api.get(`/${endpoint}/${jobId}`, { params, responseType: 'blob' });
+  },
+  
+  // 2FA
+  setup2FA: () => {
+    return api.post('/auth/2fa/setup');
+  },
+  
+  verify2FA: (token) => {
+    return api.post('/auth/2fa/verify', { token });
+  },
+  
+  enable2FA: () => {
+    return api.post('/auth/2fa/enable');
+  },
+  
+  disable2FA: () => {
+    return api.post('/auth/2fa/disable');
+  }
+};
+
+export default apiService;

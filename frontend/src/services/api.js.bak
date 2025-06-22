@@ -1,0 +1,196 @@
+import axios from 'axios';
+
+// Creating an axios instance with def// Export results handling
+  exportResultsCSV: (jobId) => {
+    return api.get(`/export/csv/${jobId}`, {
+      responseType: 'blob'
+    });
+  },
+  
+  exportResultsPDF: (jobId) => {
+    return api.get(`/export/pdf/${jobId}`, {
+      responseType: 'blob'
+    });
+  },
+  
+  filterScans: (filters = {}) => {
+    return api.get('/user/scans/filter', { params: filters });
+  },
+  
+  // Visualization endpoints with customization options
+  getVisualizationUrl: (jobId, options = {}) => {
+    const {
+      type = 'slice',              // 'slice', 'multi-slice', 'projection', 'lesions'
+      quality = 'high',            // 'high', 'standard'
+      slice = null,                // slice index (null = middle slice)
+      numSlices = 5,               // for multi-slice view
+      upscale = 1.2,               // upscaling factor for high-res visualizations
+      enhanceContrast = true,      // contrast enhancement
+      enhanceEdges = true          // edge enhancement
+    } = options;
+    
+    const params = { 
+      quality, 
+      upscale, 
+      enhance_contrast: enhanceContrast, 
+      enhance_edges: enhanceEdges,
+      type // Use 'type' as parameter name to match backend expectation
+    };
+    
+    // Add conditional parameters
+    if (slice !== null) params.slice_idx = slice;
+    if (type === 'multi-slice') params.num_slices = numSlices;
+    
+    // Build the URL with query parameters
+    const queryString = Object.keys(params)
+      .map(key => `${key}=${params[key]}`)
+      .join('&');
+    
+    // Use advanced-visualization endpoint for high quality images
+    const endpoint = quality === 'high' ? 'advanced-visualization' : 'visualization';
+    
+    // Return full URL string for direct use in img src attribute
+    return `/${endpoint}/${jobId}?${queryString}`;
+  }
+  
+  // Visualization endpoints with customization options
+  getVisualization: (jobId, options = {}) => {
+    const {
+      type = 'slice',              // 'slice', 'multi-slice', 'projection', 'lesions'
+      quality = 'high',            // 'high', 'standard'
+      slice = null,                // slice index (null = middle slice)
+      numSlices = 5,               // for multi-slice view
+      upscale = 1.2,               // upscaling factor for high-res visualizations
+      enhanceContrast = true,      // contrast enhancement
+      enhanceEdges = true          // edge enhancement
+    } = options;
+    
+    const params = { 
+      quality, 
+      upscale, 
+      enhance_contrast: enhanceContrast, 
+      enhance_edges: enhanceEdges,
+      viz_type: type
+    };
+    
+    // Add conditional parameters
+    if (slice !== null) params.slice_idx = slice;
+    if (type === 'multi-slice') params.num_slices = numSlices;
+    
+    // Build the URL with query parameters
+    const queryString = Object.keys(params)
+      .map(key => `${key}=${params[key]}`)
+      .join('&');
+    
+    // Return full URL string for direct use in img src attribute
+    return `/visualization/${jobId}?${queryString}`;
+  },nst api = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+  headers: {
+    'Content-Type': 'application/json',
+  }
+});
+
+// API service with methods for all backend communication
+const apiService = {
+  // Auth token management
+  setAuthHeader: (token) => {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  },
+  
+  clearAuthHeader: () => {
+    delete api.defaults.headers.common['Authorization'];
+  },
+  
+  // Helper function to build visualization URLs with options
+  getVisualizationUrl: (jobId, options = {}) => {
+    const params = new URLSearchParams();
+    
+    // Set default parameters
+    params.set('quality', options.quality || 'high');
+    params.set('upscale', options.upscale || '1.2');
+    params.set('enhance_contrast', options.enhanceContrast !== false);
+    params.set('enhance_edges', options.enhanceEdges !== false);
+    
+    // Set visualization type
+    if (options.type) {
+      params.set('viz_type', options.type);
+    }
+    
+    // Add slice index if specified
+    if (options.slice !== undefined && options.slice !== null) {
+      params.set('slice_idx', options.slice);
+    }
+    
+    // Add number of slices for multi-slice view
+    if (options.type === 'multi-slice') {
+      params.set('num_slices', options.numSlices || 5);
+    }
+    
+    return `/visualization/${jobId}?${params.toString()}`;
+  },
+  
+  // Authentication
+  register: (userData) => {
+    return api.post('/auth/register', userData);
+  },
+  
+  login: (credentials) => {
+    return api.post('/auth/login', credentials);
+  },
+  
+  logout: () => {
+    return api.post('/auth/logout');
+  },
+  
+  getUserProfile: () => {
+    return api.get('/user/profile');
+  },
+  
+  // User data
+  getUserScans: (page = 1, perPage = 10) => {
+    return api.get('/user/scans', {
+      params: { page, per_page: perPage }
+    });
+  },
+
+  // Upload MRI scan file (with optional auth)
+  uploadFile: (formData) => {
+    return api.post('/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+  },
+  
+  // Get processing status and results by job ID
+  getResults: (jobId) => {
+    return api.get(`/results/${jobId}`);
+  },
+  
+  // Get health status of the API
+  healthCheck: () => {
+    return api.get('/health');
+  },
+  
+  // Two-factor authentication has been removed
+  
+  // Advanced results handling
+  exportResultsCSV: (jobId) => {
+    return api.get(`/export/csv/${jobId}`, {
+      responseType: 'blob'
+    });
+  },
+  
+  exportResultsPDF: (jobId) => {
+    return api.get(`/export/pdf/${jobId}`, {
+      responseType: 'blob'
+    });
+  },
+  
+  filterScans: (filters = {}) => {
+    return api.get('/user/scans/filter', { params: filters });
+  },
+};
+
+export default apiService;

@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Monitor NPY Files",
+			"type": "shell",
+			"command": "docker exec -it met-project_model-service_1 bash -c \"cd /app && python monitor_results.py -w\"",
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}

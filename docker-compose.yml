@@ -1,0 +1,128 @@
+version: '3.8'
+
+# Run the model verification script before starting services
+x-model-verify: &model-verify
+  command: >
+    bash -c "
+      if [ ! -f /app/models/brats_t1ce.pth ] || [ ! -s /app/models/brats_t1ce.pth ]; then
+        echo 'Warning: Model file not found or empty. Creating placeholder.';
+        dd if=/dev/zero of=/app/models/brats_t1ce.pth bs=1024 count=1;
+        echo 'Created placeholder model file. Replace with actual model in production.';
+      else
+        echo 'Model file exists and is non-empty.';
+      fi && 
+      gunicorn --bind 0.0.0.0:5001 --timeout 600 --workers 1 --threads 1 --max-requests 1 --max-requests-jitter 0 model_service:app
+    "
+
+services:
+  api-gateway:
+    build: 
+      context: ./backend/api_gateway
+    ports:
+      - "8000:5000"
+    environment:
+      - MODEL_SERVICE_URL=http://model-service:5001
+      - IMAGE_PROCESSING_SERVICE_URL=http://image-processing-service:5002
+      - USER_SERVICE_URL=http://user-service:5003
+    volumes:
+      - shared-data:/app/uploads
+      - shared-results:/app/results
+    depends_on:
+      - model-service
+      - image-processing-service
+      - user-service
+    networks:
+      - met-network
+
+  model-service:
+    build:
+      context: ./backend/model_service
+    command: ["python", "simple_model_service.py"]  # Use our simplified model service
+    restart: unless-stopped   # Automatically restart if the container fails
+    environment:
+      - MODEL_PATH=/app/models/brats_t1ce.pth
+      - WORKERS=1  # Limit to a single worker to reduce memory usage
+      - MOCK_MODEL=true  # Use the lightweight mock model to avoid memory issues
+      - TORCH_NO_GRAD=1  # Use inference mode to reduce memory usage
+      - TORCH_DISABLE_JIT=1  # Disable JIT to reduce memory usage
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+      - OMP_NUM_THREADS=1  # Limit OpenMP threads
+      - MKL_NUM_THREADS=1  # Limit MKL threads
+      - OPENBLAS_NUM_THREADS=1
+      - VECLIB_MAXIMUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
+      - MALLOC_TRIM_THRESHOLD_=65536
+    volumes:
+      - ./Data/saved_models:/app/models
+      - shared-data:/app/uploads
+      - shared-results:/app/results
+    networks:
+      - met-network
+    deploy:
+      resources:
+        limits:
+          memory: 6G  # Increased to 6G since the 4G seems insufficient
+        reservations:
+          memory: 2G
+
+  image-processing-service:
+    build:
+      context: ./backend/image_processing_service
+    volumes:
+      - shared-results:/app/results
+    networks:
+      - met-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  mysql:
+    image: mysql:8.0
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=met_user_service
+    ports:
+      - "13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - met-network
+    command: --default-authentication-plugin=mysql_native_password
+      
+  user-service:
+    build:
+      context: ./backend/user_service
+    environment:
+      - JWT_SECRET_KEY=change-this-in-production
+      - DB_USER=root
+      - DB_PASSWORD=password
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=met_user_service
+    depends_on:
+      - mysql
+    networks:
+      - met-network
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - met-network
+
+networks:
+  met-network:
+    driver: bridge
+
+volumes:
+  shared-data:
+  shared-results:
+  mysql-data:
