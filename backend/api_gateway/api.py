@@ -832,3 +832,95 @@ def model_health_check():
     except Exception as e:
         logging.error(f"Error checking model service health: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 503
+
+@app.route('/side-by-side-visualization/<job_id>', methods=['GET'])
+def get_side_by_side_visualization(job_id):
+    """
+    Endpoint to get side-by-side visualization of original image and segmentation mask
+    
+    Args:
+        job_id: Job ID for the scan
+        
+    Query parameters:
+    - slice_idx: Optional slice index for the visualization
+    - view_type: View type (axial, coronal, sagittal)
+    - upscale_factor: Optional upscale factor for visualization
+    - contrast_enhancement: Whether to apply contrast enhancement (true/false)
+    - edge_enhancement: Whether to apply edge enhancement (true/false)
+    """
+    try:
+        # Log the visualization request parameters
+        logging.info(f"Side-by-side visualization request for job {job_id} with params: {request.args}")
+        
+        # Forward the request to the image processing service with all query parameters
+        viz_response = requests.get(
+            f"{IMAGE_PROCESSING_SERVICE_URL}/side-by-side/{job_id}",
+            params=request.args,
+            stream=True
+        )
+        
+        if viz_response.status_code != 200:
+            logging.error(f"Image processing service returned error: {viz_response.status_code}")
+            error_data = viz_response.json() if viz_response.headers.get('Content-Type') == 'application/json' else {"error": "Visualization generation failed"}
+            return jsonify(error_data), viz_response.status_code
+        
+        logging.info(f"Side-by-side visualization successfully generated for job {job_id}")
+        
+        # Stream the visualization image back to the client
+        return Response(
+            viz_response.iter_content(chunk_size=1024),
+            status=viz_response.status_code,
+            headers={
+                'Content-Type': viz_response.headers.get('Content-Type', 'image/png'),
+                'Content-Disposition': viz_response.headers.get('Content-Disposition', f'inline; filename="{job_id}_side_by_side.png"')
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error generating side-by-side visualization for job {job_id}: {str(e)}")
+        return jsonify({"error": f"Visualization failed: {str(e)}"}), 500
+
+@app.route('/three-plane-visualization/<job_id>', methods=['GET'])
+def get_three_plane_visualization(job_id):
+    """
+    Endpoint to get visualization with all three anatomical planes side by side
+    
+    Args:
+        job_id: Job ID for the scan
+        
+    Query parameters:
+    - axial_slice_idx: Optional axial slice index
+    - coronal_slice_idx: Optional coronal slice index
+    - sagittal_slice_idx: Optional sagittal slice index
+    - contrast_enhancement: Whether to apply contrast enhancement (true/false)
+    - edge_enhancement: Whether to apply edge enhancement (true/false)
+    """
+    try:
+        # Log the visualization request parameters
+        logging.info(f"Three-plane visualization request for job {job_id} with params: {request.args}")
+        
+        # Forward the request to the image processing service with all query parameters
+        viz_response = requests.get(
+            f"{IMAGE_PROCESSING_SERVICE_URL}/three-plane/{job_id}",
+            params=request.args,
+            stream=True
+        )
+        
+        if viz_response.status_code != 200:
+            logging.error(f"Image processing service returned error: {viz_response.status_code}")
+            error_data = viz_response.json() if viz_response.headers.get('Content-Type') == 'application/json' else {"error": "Visualization generation failed"}
+            return jsonify(error_data), viz_response.status_code
+        
+        logging.info(f"Three-plane visualization successfully generated for job {job_id}")
+        
+        # Stream the visualization image back to the client
+        return Response(
+            viz_response.iter_content(chunk_size=1024),
+            status=viz_response.status_code,
+            headers={
+                'Content-Type': viz_response.headers.get('Content-Type', 'image/png'),
+                'Content-Disposition': viz_response.headers.get('Content-Disposition', f'inline; filename="{job_id}_three_plane.png"')
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error generating three-plane visualization for job {job_id}: {str(e)}")
+        return jsonify({"error": f"Visualization failed: {str(e)}"}), 500

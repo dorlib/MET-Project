@@ -236,6 +236,7 @@ const apiService = {
       type = 'slice',              // 'slice', 'multi-slice', 'projection', 'lesions'
       quality = 'high',            // 'high', 'standard'
       slice = null,                // slice index (null = middle slice)
+      viewType = 'axial',          // 'axial', 'coronal', 'sagittal'
       numSlices = 5,               // for multi-slice view
       upscale = 1.2,               // upscaling factor for high-res visualizations
       enhanceContrast = true,      // contrast enhancement
@@ -258,7 +259,8 @@ const apiService = {
       upscale, 
       enhance_contrast: enhanceContrast, 
       enhance_edges: enhanceEdges,
-      type // Use 'type' as parameter name to match backend expectation
+      type, // Use 'type' as parameter name to match backend expectation
+      view_type: viewType // Include view type for all visualizations
     };
     
     // Add conditional parameters
@@ -347,7 +349,80 @@ const apiService = {
       };
       return response;
     });
-  }
+  },
+  
+  // Get URL for side-by-side visualization
+  getSideBySideUrl: (jobId, options = {}) => {
+    const {
+      slice = null,              // slice index (null = middle slice)
+      viewType = 'axial',        // 'axial', 'coronal', 'sagittal'
+      upscale = 1.2,             // upscaling factor
+      enhanceContrast = true,    // contrast enhancement
+      enhanceEdges = true,       // edge enhancement
+    } = options;
+    
+    // Check if the job is in cache and is in a terminal state
+    const cachedData = apiService._resultsCache[jobId];
+    if (cachedData?.response?.data?.status === 'not_found') {
+      console.log(`Side-by-side visualization requested for not_found job ${jobId}, returning empty URL`);
+      return '#'; // Return a non-functional URL for jobs not found
+    }
+    
+    const params = { 
+      view_type: viewType,
+      upscale_factor: upscale,
+      contrast_enhancement: enhanceContrast,
+      edge_enhancement: enhanceEdges
+    };
+    
+    if (slice !== null) {
+      params.slice_idx = slice;
+    } else {
+      // Default to middle slice
+      params.slice_idx = 50;
+    }
+    
+    // Build the URL with query parameters
+    const queryString = Object.keys(params)
+      .map(key => `${key}=${params[key]}`)
+      .join('&');
+    
+    return `/side-by-side-visualization/${jobId}?${queryString}`;
+  },
+  
+  // Get URL for three-plane visualization
+  getThreePlaneUrl: (jobId, options = {}) => {
+    const {
+      axialSlice = null,         // axial slice index
+      coronalSlice = null,       // coronal slice index
+      sagittalSlice = null,      // sagittal slice index
+      enhanceContrast = true,    // contrast enhancement
+      enhanceEdges = true,       // edge enhancement
+    } = options;
+    
+    // Check if the job is in cache and is in a terminal state
+    const cachedData = apiService._resultsCache[jobId];
+    if (cachedData?.response?.data?.status === 'not_found') {
+      console.log(`Three-plane visualization requested for not_found job ${jobId}, returning empty URL`);
+      return '#'; // Return a non-functional URL for jobs not found
+    }
+    
+    const params = {
+      contrast_enhancement: enhanceContrast,
+      edge_enhancement: enhanceEdges
+    };
+    
+    if (axialSlice !== null) params.axial_slice_idx = axialSlice;
+    if (coronalSlice !== null) params.coronal_slice_idx = coronalSlice;
+    if (sagittalSlice !== null) params.sagittal_slice_idx = sagittalSlice;
+    
+    // Build the URL with query parameters
+    const queryString = Object.keys(params)
+      .map(key => `${key}=${params[key]}`)
+      .join('&');
+    
+    return `/three-plane-visualization/${jobId}?${queryString}`;
+  },
 };
 
 export default apiService;

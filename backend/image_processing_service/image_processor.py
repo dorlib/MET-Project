@@ -10,24 +10,26 @@ import json
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import io
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from skimage import measure
 import pandas as pd
 import nibabel as nib
 from scipy.ndimage import zoom
 import cv2
 import matplotlib
-# Import our high-resolution visualization module
+# Import our high-resolution visualization modules
 from high_res_viz import create_high_res_visualization, generate_high_res_multi_slice_view
+# Import fixed visualization functions for side-by-side viewing
+from fixed_high_res_viz import create_side_by_side_visualization, create_side_by_side_three_plane_visualization
 matplotlib.use('Agg')  # Use non-interactive backend for matplotlib
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 RESULTS_FOLDER = '/app/results'
-METASTASIS_CLASS = 3  # Assuming class 3 is for metastasis in the segmentation masks
-EDEMA_CLASS = 2       # Assuming class 2 is for edema
-TUMOR_CORE_CLASS = 1  # Assuming class 1 is for tumor core
+METASTASIS_CLASS = 1  # Class 1 is for metastasis in the simplified model
+EDEMA_CLASS = 2       # Class 2 is for edema
+TUMOR_CORE_CLASS = 3  # Class 3 is for tumor core (not used in simplified model)
 VOXEL_VOLUME_MM3 = 1.0  # Default voxel volume in mm³ (can be adjusted based on scan parameters)
 TISSUE_COLORS = {
     METASTASIS_CLASS: (1.0, 0.0, 0.0),       # Red for metastasis
@@ -151,13 +153,14 @@ def create_colormap_visualization(segmentation, original_image=None, slice_idx=N
     
     return Image.open(buf)
 
-def generate_3d_projection(segmentation, class_id=None):
+def generate_3d_projection(segmentation, class_id=None, slice_idx=None):
     """
     Generate a 3D projection visualization of the segmentation
     
     Args:
         segmentation: 3D segmentation mask
         class_id: Optional specific class to highlight, if None show all classes
+        slice_idx: Optional slice index for visualization, affects all three planes
         
     Returns:
         PIL Image object containing the 3D projection
@@ -169,10 +172,25 @@ def generate_3d_projection(segmentation, class_id=None):
         # Use all non-zero values
         binary_mask = (segmentation > 0).astype(np.uint8)
     
-    # Create three projections (axial, sagittal, coronal)
-    axial = np.max(binary_mask, axis=0)
-    sagittal = np.max(binary_mask, axis=1)
-    coronal = np.max(binary_mask, axis=2)
+    # Get dimensions
+    depth, height, width = binary_mask.shape
+    
+    # If slice_idx provided, create projections using that slice for all three views
+    if slice_idx is not None:
+        # Ensure slice_idx is within bounds
+        slice_idx = max(0, min(slice_idx, depth-1))
+        
+        # Create slices through each dimension using the provided index
+        axial = binary_mask[slice_idx, :, :]  # Slice in axial plane
+        sagittal = binary_mask[:, :, slice_idx % width]  # Slice in sagittal plane (mod to ensure in range)
+        coronal = binary_mask[:, slice_idx % height, :]  # Slice in coronal plane (mod to ensure in range)
+        
+        logging.info(f"Using slice_idx={slice_idx} for 3D projection views")
+    else:
+        # Create maximum intensity projections along each dimension
+        axial = np.max(binary_mask, axis=0)
+        sagittal = np.max(binary_mask, axis=1)
+        coronal = np.max(binary_mask, axis=2)
     
     # Create a figure with the three projections
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -787,7 +805,13 @@ def get_visualization(job_id):
                     contrast_enhancement = request.args.get('enhance_contrast', 'true').lower() == 'true'
                     edge_enhancement = request.args.get('enhance_edges', 'true').lower() == 'true'
                     
-                    logging.info(f"Using high-res visualization with upscale={upscale_factor}, contrast={contrast_enhancement}, edges={edge_enhancement}")
+                    # Get view type (axial, coronal, sagittal)
+                    view_type = request.args.get('view_type', 'axial')
+                    if view_type not in ['axial', 'coronal', 'sagittal']:
+                        logging.warning(f"Invalid view_type: {view_type}, defaulting to axial")
+                        view_type = 'axial'
+                    
+                    logging.info(f"Using high-res visualization with upscale={upscale_factor}, contrast={contrast_enhancement}, edges={edge_enhancement}, view_type={view_type}")
                     
                     # Use the new high resolution visualization with enhanced parameters
                     image = create_high_res_visualization(
@@ -798,7 +822,8 @@ def get_visualization(job_id):
                         tissue_names=TISSUE_NAMES,
                         upscale_factor=upscale_factor,
                         contrast_enhancement=contrast_enhancement,
-                        edge_enhancement=edge_enhancement
+                        edge_enhancement=edge_enhancement,
+                        view_type=view_type
                     )
                     logging.info("High-res visualization completed successfully")
             except Exception as e:
@@ -807,7 +832,7 @@ def get_visualization(job_id):
                 image = create_colormap_visualization(segmentation, original_image, slice_idx)
         
         elif viz_type == 'projection':
-            image = generate_3d_projection(segmentation, class_id)
+            image = generate_3d_projection(segmentation, class_id, slice_idx)
             
         elif viz_type == 'multi-slice':
             num_slices = int(request.args.get('num_slices', 5))
@@ -1151,5 +1176,204 @@ def get_volume_info(job_id):
         logging.error(f"Error getting volume info for job {job_id}: {str(e)}")
         return jsonify({"error": f"Failed to get volume info: {str(e)}"}), 500
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5002)
+@app.route('/side-by-side/<job_id>', methods=['GET'])
+def get_side_by_side_visualization(job_id):
+    """
+    Generate and return side-by-side visualization for original image and segmentation mask
+    
+    Query parameters:
+    - slice_idx: Optional slice index for slice visualizations
+    - view_type: View type (axial, coronal, sagittal)
+    - contrast_enhancement: Whether to enhance contrast (true/false)
+    - edge_enhancement: Whether to enhance edges (true/false)
+    - upscale_factor: Upscaling factor (default: 1.0)
+    """
+    if not job_id:
+        return jsonify({"error": "Missing job ID"}), 400
+        
+    # Validate job_id format
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+        
+    try:
+        slice_idx = int(request.args.get('slice_idx')) if request.args.get('slice_idx') else None
+        logging.info(f"Requested slice_idx={slice_idx} for job {job_id}")
+    except ValueError:
+        logging.error(f"Invalid slice_idx parameter: {request.args.get('slice_idx')}")
+        return jsonify({"error": "Invalid slice_idx parameter"}), 400
+
+    # Get view type (axial, coronal, sagittal)
+    view_type = request.args.get('view_type', 'axial')
+    if view_type not in ['axial', 'coronal', 'sagittal']:
+        logging.warning(f"Invalid view_type: {view_type}, defaulting to axial")
+        view_type = 'axial'
+        
+    # Find prediction and original files
+    pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+    orig_path = os.path.join(RESULTS_FOLDER, f"{job_id}_original.npy")
+    
+    logging.info(f"Looking for segmentation at {pred_path} for side-by-side visualization")
+    
+    if not os.path.exists(pred_path):
+        logging.error(f"Segmentation not found at {pred_path}")
+        return jsonify({"error": "Segmentation not found"}), 404
+    
+    try:
+        # Load the segmentation mask
+        logging.info(f"Loading segmentation from {pred_path} for visualization")
+        segmentation = load_volume_data(pred_path)
+        logging.info(f"Segmentation loaded successfully. Shape: {segmentation.shape}, Unique values: {np.unique(segmentation)}")
+        
+        # Load original image if available
+        original_image = None
+        if os.path.exists(orig_path):
+            try:
+                logging.info(f"Loading original image from {orig_path}")
+                original_image = load_volume_data(orig_path)
+                logging.info(f"Original image loaded successfully. Shape: {original_image.shape}")
+            except Exception as e:
+                logging.warning(f"Could not load original image: {str(e)}")
+        else:
+            logging.warning(f"Original image file not found: {orig_path}")
+            return jsonify({"error": "Original image not found"}), 404
+        
+        # Parse enhancement options
+        try:
+            upscale_factor = float(request.args.get('upscale_factor', '1.0'))
+            # Limit upscale factor to reasonable values
+            upscale_factor = min(max(upscale_factor, 1.0), 2.0)
+        except (ValueError, TypeError):
+            upscale_factor = 1.0
+            
+        # Parse boolean options
+        contrast_enhancement = request.args.get('contrast_enhancement', 'true').lower() == 'true'
+        edge_enhancement = request.args.get('edge_enhancement', 'true').lower() == 'true'
+        
+        logging.info(f"Using side-by-side visualization with upscale={upscale_factor}, contrast={contrast_enhancement}, edges={edge_enhancement}")
+        
+        # Generate side-by-side visualization
+        image = create_side_by_side_visualization(
+            segmentation, 
+            original_image, 
+            slice_idx,
+            tissue_colors=TISSUE_COLORS,
+            tissue_names=TISSUE_NAMES,
+            upscale_factor=upscale_factor,
+            contrast_enhancement=contrast_enhancement,
+            edge_enhancement=edge_enhancement,
+            view_type=view_type
+        )
+        
+        logging.info("Side-by-side visualization completed successfully")
+        
+        # Convert to PNG and return
+        img_io = io.BytesIO()
+        image.save(img_io, format='PNG', quality=95)
+        img_io.seek(0)
+        
+        return Response(
+            img_io.getvalue(),
+            mimetype='image/png',
+            headers={
+                'Content-Disposition': f'inline; filename="{job_id}_{view_type}_side_by_side.png"'
+            }
+        )
+        
+    except Exception as e:
+        logging.error(f"Error generating side-by-side visualization: {str(e)}")
+        return jsonify({"error": f"Visualization failed: {str(e)}"}), 500
+
+@app.route('/three-plane/<job_id>', methods=['GET'])
+def get_three_plane_visualization(job_id):
+    """
+    Generate and return visualization with all three anatomical planes side by side
+    
+    Query parameters:
+    - axial_slice_idx: Optional axial slice index
+    - coronal_slice_idx: Optional coronal slice index
+    - sagittal_slice_idx: Optional sagittal slice index
+    - contrast_enhancement: Whether to enhance contrast (true/false)
+    - edge_enhancement: Whether to enhance edges (true/false)
+    """
+    if not job_id:
+        return jsonify({"error": "Missing job ID"}), 400
+        
+    # Validate job_id format
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+        
+    try:
+        axial_slice_idx = int(request.args.get('axial_slice_idx')) if request.args.get('axial_slice_idx') else None
+        coronal_slice_idx = int(request.args.get('coronal_slice_idx')) if request.args.get('coronal_slice_idx') else None
+        sagittal_slice_idx = int(request.args.get('sagittal_slice_idx')) if request.args.get('sagittal_slice_idx') else None
+        logging.info(f"Requested slice indices: axial={axial_slice_idx}, coronal={coronal_slice_idx}, sagittal={sagittal_slice_idx}")
+    except ValueError:
+        logging.error(f"Invalid slice index parameters")
+        return jsonify({"error": "Invalid slice index parameters"}), 400
+        
+    # Find prediction and original files
+    pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+    orig_path = os.path.join(RESULTS_FOLDER, f"{job_id}_original.npy")
+    
+    logging.info(f"Looking for segmentation at {pred_path} for three-plane visualization")
+    
+    if not os.path.exists(pred_path):
+        logging.error(f"Segmentation not found at {pred_path}")
+        return jsonify({"error": "Segmentation not found"}), 404
+    
+    try:
+        # Load the segmentation mask
+        logging.info(f"Loading segmentation from {pred_path}")
+        segmentation = load_volume_data(pred_path)
+        logging.info(f"Segmentation loaded successfully. Shape: {segmentation.shape}, Unique values: {np.unique(segmentation)}")
+        
+        # Load original image if available
+        original_image = None
+        if os.path.exists(orig_path):
+            try:
+                logging.info(f"Loading original image from {orig_path}")
+                original_image = load_volume_data(orig_path)
+                logging.info(f"Original image loaded successfully. Shape: {original_image.shape}")
+            except Exception as e:
+                logging.warning(f"Could not load original image: {str(e)}")
+        else:
+            logging.warning(f"Original image file not found: {orig_path}")
+            return jsonify({"error": "Original image not found"}), 404
+            
+        # Parse boolean options
+        contrast_enhancement = request.args.get('contrast_enhancement', 'true').lower() == 'true'
+        edge_enhancement = request.args.get('edge_enhancement', 'true').lower() == 'true'
+        
+        logging.info(f"Using three-plane visualization with contrast={contrast_enhancement}, edges={edge_enhancement}")
+        
+        # Generate three-plane visualization
+        image = create_side_by_side_three_plane_visualization(
+            segmentation, 
+            original_image, 
+            axial_slice_idx, 
+            coronal_slice_idx, 
+            sagittal_slice_idx,
+            tissue_colors=TISSUE_COLORS,
+            tissue_names=TISSUE_NAMES,
+            contrast_enhancement=contrast_enhancement,
+            edge_enhancement=edge_enhancement
+        )
+        
+        logging.info("Three-plane visualization completed successfully")
+        
+        # Convert to PNG and return
+        img_io = io.BytesIO()
+        image.save(img_io, format='PNG', quality=95)
+        img_io.seek(0)
+        
+        return Response(
+            img_io.getvalue(),
+            mimetype='image/png',
+            headers={
+                'Content-Disposition': f'inline; filename="{job_id}_three_plane.png"'
+            }
+        )
+        
+    except Exception as e:
+        logging.error(f"Error generating three-plane visualization: {str(e)}")
+        return jsonify({"error": f"Visualization failed: {str(e)}"}), 500

@@ -36,16 +36,16 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
         
     if tissue_colors is None:
         tissue_colors = {
-            1: (0.0, 0.0, 1.0),    # Blue for tumor core
-            2: (0.0, 1.0, 0.0),    # Green for edema
-            3: (1.0, 0.0, 0.0)     # Red for metastasis
+            1: (1.0, 0.0, 0.0),    # Red for metastasis (class 1 in simplified model)
+            2: (0.0, 1.0, 0.0),    # Green for edema (class 2 in simplified model)
+            3: (0.0, 0.0, 1.0)     # Blue for tumor core (not used in simplified model)
         }
         
     if tissue_names is None:
         tissue_names = {
-            1: "Tumor Core",
+            1: "Metastasis",
             2: "Edema",
-            3: "Metastasis"
+            3: "Tumor Core"
         }
     
     # Determine which slice to use and ensure it's valid
@@ -93,10 +93,11 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
     # Create a colored visualization
     colors = np.zeros((*mask_slice.shape, 4))
     
-    # Apply colors for each tissue type
+    # Apply colors for each tissue type with increased vividness for better visibility
     for class_id, color in tissue_colors.items():
         mask = mask_slice == class_id
         if np.any(mask):
+            # Use full opacity for a stronger color effect
             colors[mask] = (*color, 1.0)  # RGB + alpha
     
     # If no segmentation found, make entire image transparent
@@ -199,8 +200,8 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
     # Plot the original image as grayscale with improved rendering
     plt.imshow(orig_slice, cmap='gray', interpolation='lanczos')
     
-    # Overlay the colormap visualization with slightly reduced alpha for better original visibility
-    plt.imshow(colors, alpha=0.6, interpolation='lanczos')
+    # Overlay the colormap visualization with increased alpha for better visibility
+    plt.imshow(colors, alpha=0.8, interpolation='lanczos')
     
     # Add a legend for tissue types
     legend_elements = []
@@ -278,16 +279,16 @@ def generate_high_res_multi_slice_view(segmentation, original_image=None, num_sl
     """
     if tissue_colors is None:
         tissue_colors = {
-            1: (0.0, 0.0, 1.0),    # Blue for tumor core
-            2: (0.0, 1.0, 0.0),    # Green for edema
-            3: (1.0, 0.0, 0.0)     # Red for metastasis
+            1: (1.0, 0.0, 0.0),    # Red for metastasis (class 1 in simplified model)
+            2: (0.0, 1.0, 0.0),    # Green for edema (class 2 in simplified model)
+            3: (0.0, 0.0, 1.0)     # Blue for tumor core (not used in simplified model)
         }
         
     if tissue_names is None:
         tissue_names = {
-            1: "Tumor Core",
+            1: "Metastasis",
             2: "Edema",
-            3: "Metastasis"
+            3: "Tumor Core"
         }
         
     depth = segmentation.shape[0]

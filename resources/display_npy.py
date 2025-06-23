@@ -66,7 +66,7 @@ class Viewer:
                 0: (0.0, 0.0, 0.0, 0.0),  # transparent background
                 1: (1.0, 0.0, 0.0, 0.5),  # red (metastasis)
                 2: (0.6, 0.7, 0.0, 0.5),  # yellow (edema)
-                3: (0.0, 1.0, 1.0, 0.5),  # blue (core)
+                3: (0.0, 1.0, 1.0, 0.5),  # blue (core/tumor)
             }
 
         # Add prediction layer

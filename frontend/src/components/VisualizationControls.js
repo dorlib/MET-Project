@@ -48,7 +48,9 @@ const VisualizationControls = ({
   setEnhanceContrast,
   enhanceEdges,
   setEnhanceEdges,
-  maxSliceIndex
+  maxSliceIndex,
+  viewType,
+  setViewType
 }) => {
   // Use local state to track slider position during dragging
   const [localSliceIndex, setLocalSliceIndex] = React.useState(
@@ -97,7 +99,9 @@ const VisualizationControls = ({
               label="Type"
               onChange={(e) => setVizType(e.target.value)}
             >
-              <MenuItem value="slice">Single Slice</MenuItem>
+              <MenuItem value="slice">Single Slice (Overlay)</MenuItem>
+              <MenuItem value="side-by-side">Side By Side (2D)</MenuItem>
+              <MenuItem value="three-plane">Three Plane View</MenuItem>
               <MenuItem value="multi-slice">Multiple Slices</MenuItem>
               <MenuItem value="projection">3D Projection</MenuItem>
               <MenuItem value="lesions">Lesions Focus</MenuItem>
@@ -141,7 +145,7 @@ const VisualizationControls = ({
           )}
         </Grid>
 
-        {vizType === 'slice' && (
+        {(vizType === 'slice' || vizType === 'projection') && (
           <Grid item xs={12}>
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
               <Typography variant="body2" sx={{ mr: 1, whiteSpace: 'nowrap' }}>
@@ -229,6 +233,24 @@ const VisualizationControls = ({
                 label="Enhance Edges"
               />
             </Stack>
+          </Grid>
+        )}
+
+        {/* Show view type selector for both slice and side-by-side views */}
+        {(vizType === 'slice' || vizType === 'side-by-side') && (
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth size="small">
+              <InputLabel>View Type</InputLabel>
+              <Select
+                value={viewType || 'axial'}
+                label="View Type"
+                onChange={(e) => setViewType && setViewType(e.target.value)}
+              >
+                <MenuItem value="axial">Axial</MenuItem>
+                <MenuItem value="coronal">Coronal</MenuItem>
+                <MenuItem value="sagittal">Sagittal</MenuItem>
+              </Select>
+            </FormControl>
           </Grid>
         )}
       </Grid>

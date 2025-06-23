@@ -33,6 +33,9 @@ RUN mkdir -p /app/uploads /app/results /app/models /app/data
 # Copy application code
 COPY . .
 
+# Copy model files to the container
+COPY ./../../Data/saved_models/brats_t1ce.pth /app/models/brats_t1ce.pth
+
 # Create a startup script to properly handle signals
 RUN echo '#!/bin/bash' > /app/start.sh && \
     echo '# Start Gunicorn with proper signal handling' >> /app/start.sh && \

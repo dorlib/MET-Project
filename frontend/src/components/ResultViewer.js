@@ -44,6 +44,13 @@ const ResultViewer = ({ jobId, status, results }) => {
   const [maxSliceIndex, setMaxSliceIndex] = useState(100); // Default, updated later
   const [sliceInitialized, setSliceInitialized] = useState(false);
   
+  // Additional state for 2D view types (axial, coronal, sagittal)
+  const [viewType, setViewType] = useState('axial');
+  // Additional state for three-plane view
+  const [axialSliceIndex, setAxialSliceIndex] = useState(50);
+  const [coronalSliceIndex, setCoronalSliceIndex] = useState(50);
+  const [sagittalSliceIndex, setSagittalSliceIndex] = useState(50);
+  
   // Utility function to ensure we have a valid slice index
   const ensureValidSlice = useCallback((slice) => {
     if (slice === null || slice === undefined || isNaN(slice)) {
@@ -63,18 +70,40 @@ const ResultViewer = ({ jobId, status, results }) => {
     // Use the current slice index with validation
     const currentSlice = ensureValidSlice(sliceIndex);
     
-    return api.getVisualizationUrl(jobId, {
-      type: vizType,
-      quality: "high", // Force high quality
-      slice: currentSlice,
-      upscale: 2.0,
-      enhance_contrast: enhanceContrast,
-      enhance_edges: enhanceEdges,
-      brightness: 1.4,
-      contrast: 1.6,
-      show_original: true // Show original scan if no segmentation data
-    }, results?.segmentation_path);
-  }, [jobId, status, vizType, sliceIndex, enhanceContrast, enhanceEdges, results?.segmentation_path, ensureValidSlice]);
+    // Choose the appropriate URL builder based on visualization type
+    if (vizType === 'side-by-side') {
+      return api.getSideBySideUrl(jobId, {
+        slice: currentSlice,
+        viewType,
+        upscale: upscaleFactor,
+        enhanceContrast,
+        enhanceEdges
+      });
+    } else if (vizType === 'three-plane') {
+      return api.getThreePlaneUrl(jobId, {
+        axialSlice: axialSliceIndex,
+        coronalSlice: coronalSliceIndex,
+        sagittalSlice: sagittalSliceIndex,
+        enhanceContrast,
+        enhanceEdges
+      });
+    } else {
+      // Default visualization types (slice, multi-slice, projection, lesions)
+      return api.getVisualizationUrl(jobId, {
+        type: vizType,
+        quality: "high", // Force high quality
+        slice: currentSlice,
+        viewType, // Include viewType for slice view
+        upscale: upscaleFactor,
+        enhance_contrast: enhanceContrast,
+        enhance_edges: enhanceEdges,
+        brightness: 1.4,
+        contrast: 1.6,
+        show_original: true // Show original scan if no segmentation data
+      }, results?.segmentation_path);
+    }
+  }, [jobId, status, vizType, sliceIndex, enhanceContrast, enhanceEdges, upscaleFactor, 
+      results?.segmentation_path, ensureValidSlice, viewType, axialSliceIndex, coronalSliceIndex, sagittalSliceIndex]);
   
   // Log debug information when props change - moved to top level to avoid hook rules violation
   useEffect(() => {
@@ -554,6 +583,8 @@ const ResultViewer = ({ jobId, status, results }) => {
             upscaleFactor={upscaleFactor}
             setUpscaleFactor={setUpscaleFactor}
             maxSliceIndex={maxSliceIndex}
+            viewType={viewType}
+            setViewType={setViewType}
           />
           
           <Divider sx={{ my: 2 }} />
@@ -617,7 +648,7 @@ const ResultViewer = ({ jobId, status, results }) => {
                     height: '100%', 
                     objectFit: 'contain',
                     backgroundColor: '#000',
-                    filter: 'contrast(180%) brightness(150%) saturate(150%)'
+                    filter: 'brightness(110%)' // Subtle brightness enhancement without affecting colors
                   }}
                   onLoad={(e) => {
                     console.log(`Image loaded: ${e.target.naturalWidth}x${e.target.naturalHeight}`);
