@@ -37,7 +37,7 @@ services:
   model-service:
     build:
       context: ./backend/model_service
-    command: ["python", "simple_model_service.py"]  # Use our simplified model service
+    command: ["python", "real_model_service.py"]  # Use our simplified model service
     restart: unless-stopped   # Automatically restart if the container fails
     environment:
       - MODEL_PATH=/app/models/brats_t1ce.pth
