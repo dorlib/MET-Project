@@ -4,9 +4,7 @@ import { throttle } from '../utils/throttle';
 // Creating an axios instance with default configuration
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
-  headers: {
-    'Content-Type': 'application/json'
-  }
+  // Don't set default Content-Type - let each request specify its own
 });
 
 // API service with methods for all backend communication
@@ -22,15 +20,21 @@ const apiService = {
   
   // Authentication endpoints
   login: (credentials) => {
-    return api.post('/auth/login', credentials);
+    return api.post('/auth/login', credentials, {
+      headers: { 'Content-Type': 'application/json' }
+    });
   },
   
   register: (userData) => {
-    return api.post('/auth/register', userData);
+    return api.post('/auth/register', userData, {
+      headers: { 'Content-Type': 'application/json' }
+    });
   },
   
   refreshToken: () => {
-    return api.post('/auth/refresh');
+    return api.post('/auth/refresh', {}, {
+      headers: { 'Content-Type': 'application/json' }
+    });
   },
   
   validateToken: () => {
@@ -47,9 +51,8 @@ const apiService = {
     const makeRequest = async () => {
       try {
         return await api.post('/upload', formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          },
+          // Don't set Content-Type header - let the browser set it automatically for FormData
+          // This ensures multipart/form-data is used with proper boundaries
           timeout: 60000, // 60 seconds timeout
           onUploadProgress: onProgress ? (progressEvent) => {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -87,15 +90,16 @@ const apiService = {
   _resultsCache: {},
 
   // Raw getResults implementation
-  _getResultsImpl: (jobId) => {
+  _getResultsImpl: (jobId, forceRefresh = false) => {
     // If we have recent results for this job in cache, return a Promise with that data
-    const cachedData = apiService._resultsCache[jobId];
-    if (cachedData && (Date.now() - cachedData.timestamp) < 10000) { // 10 second cache
-      console.log("Using cached results for job:", jobId);
-      return Promise.resolve(cachedData.response);
+    if (!forceRefresh) {
+      const cachedData = apiService._resultsCache[jobId];
+      if (cachedData && (Date.now() - cachedData.timestamp) < 10000) { // 10 second cache
+        console.log("Using cached results for job:", jobId);
+        return Promise.resolve(cachedData.response);
+      }
     }
-    
-    console.log("Calling getResults API for job:", jobId);
+    console.log(forceRefresh ? "Bypassing cache for getResults API for job:" : "Calling getResults API for job:", jobId);
     return api.get(`/results/${jobId}`, { timeout: 10000 }) // 10 second timeout
       .then(response => {
         // Check if response indicates job doesn't exist
@@ -192,8 +196,8 @@ const apiService = {
   },
   
   // Throttled version of getResults
-  getResults: throttle((jobId) => {
-    return apiService._getResultsImpl(jobId);
+  getResults: throttle((jobId, forceRefresh = false) => {
+    return apiService._getResultsImpl(jobId, forceRefresh);
   }, 2000), // Throttle to once every 2 seconds max
   
   // User profile and history

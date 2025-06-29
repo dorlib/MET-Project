@@ -167,7 +167,8 @@ def upload_file():
         try:
             response = requests.post(
                 f"{MODEL_SERVICE_URL}/predict",
-                json={"file_path": file_path, "job_id": job_id}
+                json={"file_path": file_path, "job_id": job_id},
+                timeout=10  # Short timeout since we just need to submit the job, not wait for completion
             )
         except requests.RequestException as e:
             logging.error(f"Error communicating with model service: {str(e)}")

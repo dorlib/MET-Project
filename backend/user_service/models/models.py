@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import datetime
 import uuid
+import json
 
 Base = declarative_base()
 
@@ -50,6 +51,15 @@ class Scan(Base):
         return f"<Scan(job_id='{self.job_id}', status='{self.status}')>"
     
     def to_dict(self):
+        # Parse metastasis_volumes from JSON string to Python list if it exists
+        metastasis_volumes = None
+        if self.metastasis_volumes:
+            try:
+                metastasis_volumes = json.loads(self.metastasis_volumes)
+            except json.JSONDecodeError:
+                # If parsing fails, return it as is
+                metastasis_volumes = self.metastasis_volumes
+        
         return {
             "job_id": self.job_id,
             "file_name": self.file_name,
@@ -57,5 +67,5 @@ class Scan(Base):
             "created_at": self.created_at.isoformat(),
             "metastasis_count": self.metastasis_count,
             "total_volume": self.total_volume,
-            "metastasis_volumes": self.metastasis_volumes
+            "metastasis_volumes": metastasis_volumes
         }

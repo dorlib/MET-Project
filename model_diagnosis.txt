@@ -1,0 +1,16 @@
+Starting diagnosis...
+Checking model path: /app/models/brats_t1ce.pth
+INFO:__main__:Diagnosing model loading issue for: /app/models/brats_t1ce.pth
+INFO:__main__:Model file size: 26.20 MB
+INFO:__main__:Attempting to load state dict
+INFO:__main__:Loaded state type: <class 'collections.OrderedDict'>
+INFO:__main__:State dict contains 164 keys
+INFO:__main__:Sample keys: ['embed.patch_embeddings.weight', 'embed.position_embeddings.abs_pos_enc', 'transformer.block_list.0.mhsa.to_qvk.weight', 'transformer.block_list.0.mhsa.W_0.weight', 'transformer.block_list.0.norm_1.weight']
+INFO:__main__:Key: embed.patch_embeddings.weight, Shape: torch.Size([128, 1, 16, 16, 16]), Type: torch.float32
+INFO:__main__:Key: embed.position_embeddings.abs_pos_enc, Shape: torch.Size([1, 512, 128]), Type: torch.float32
+INFO:__main__:Key: transformer.block_list.0.mhsa.to_qvk.weight, Shape: torch.Size([384, 128]), Type: torch.float32
+INFO:__main__:Key: transformer.block_list.0.mhsa.W_0.weight, Shape: torch.Size([128, 128]), Type: torch.float32
+INFO:__main__:Key: transformer.block_list.0.norm_1.weight, Shape: torch.Size([128]), Type: torch.float32
+INFO:__main__:Found prefixes: ['embed', 'transformer', 'out_conv']
+Diagnosis: Model appears valid
+Diagnosis complete.

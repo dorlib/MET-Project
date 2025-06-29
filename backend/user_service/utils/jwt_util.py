@@ -28,6 +28,8 @@ def verify_token(token: str) -> Optional[Dict]:
     """
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        print(f"DEBUG JWT: Token verified successfully, payload: {payload}")
         return payload
-    except jwt.PyJWTError:
+    except jwt.PyJWTError as e:
+        print(f"DEBUG JWT: Token verification failed: {str(e)}")
         return None

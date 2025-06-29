@@ -127,115 +127,84 @@ const MainContent = () => {
   React.useEffect(() => {
     // Don't poll if we don't have a job ID or if job is already completed
     if (!jobId || processingStatus === 'completed') return;
-    
+
     // Also stop polling for terminal states that won't change
     const terminalStates = ['not_found', 'failed', 'error'];
     if (terminalStates.includes(processingStatus)) {
       console.log(`Job ${jobId} is in terminal state: ${processingStatus}. Stopping polling.`);
       return;
     }
-    
+
     console.log(`Setting up polling interval for job ${jobId} with status ${processingStatus}`);
-    
+
     // Use an initial polling interval of 3 seconds for more responsive updates
     const baseInterval = 3000; // 3 seconds
     const extendedInterval = 8000; // 8 seconds
     const maxPollingTime = 5 * 60 * 1000; // 5 minutes maximum polling
     const startTime = Date.now();
     const timeThreshold = 30000; // 30 seconds
-    
+
     // Track active API calls to prevent overlapping requests
     let isRequestActive = false;
     let currentInterval = baseInterval;
     let failedAttempts = 0;
     const maxFailedAttempts = 5; // Increased max attempts
-    
-    const interval = setInterval(async () => {
+    let pollingIntervalId = null;
+
+    // Polling function, shared for both intervals
+    const pollJobStatus = async () => {
       // Check if we've been polling for too long (to prevent indefinite polling)
       if (Date.now() - startTime > maxPollingTime) {
         console.log(`Reached maximum polling time for job ${jobId}. Stopping.`);
-        clearInterval(interval);
+        clearInterval(pollingIntervalId);
         setErrorMessage("Processing is taking longer than expected. Please check back later.");
         setShowError(true);
         return;
       }
-      
+
       // Skip this interval if there's already a request in progress
       if (isRequestActive) {
         console.log("Skipping results check - previous request still active");
         return;
       }
-      
+
       try {
         isRequestActive = true;
-        
+
         // Determine if we should use the longer polling interval
         const currentTime = Date.now();
         if (currentTime - startTime > timeThreshold && currentInterval === baseInterval) {
-          // If we've been polling for more than a minute, update the interval
-          clearInterval(interval);
+          // If we've been polling for more than the threshold, update the interval
+          clearInterval(pollingIntervalId);
           console.log("Switching to longer polling interval");
           currentInterval = extendedInterval;
-          
-          // Create a new interval with the extended time
-          setInterval(async () => {
-            // This is the same code as in the main interval function
-            if (isRequestActive) return;
-            
-            try {
-              isRequestActive = true;
-              console.log(`Checking status for job ${jobId} (extended interval)...`);
-              const response = await api.getResults(jobId);
-              const data = response.data;
-              
-              failedAttempts = 0;
-              setProcessingStatus(data.status);
-              
-              if (data.status === 'completed' || terminalStates.includes(data.status)) {
-                if (data.status === 'completed') {
-                  setResults(data);
-                } else if (data.status === 'not_found') {
-                  setErrorMessage("The requested job could not be found. It may have been deleted or expired.");
-                  setErrorSeverity('warning');
-                  setShowError(true);
-                } else {
-                  setErrorMessage("Processing failed. Please try again or contact support if the issue persists.");
-                  setErrorSeverity('error');
-                  setShowError(true);
-                }
-                return; // No need to continue polling
-              }
-            } catch (error) {
-              console.error("Failed to check job status in extended interval:", error);
-              failedAttempts++;
-            } finally {
-              isRequestActive = false;
-            }
-          }, extendedInterval);
-          
-          // Return from this function to stop executing the original interval
+          pollingIntervalId = setInterval(pollJobStatus, extendedInterval);
+          isRequestActive = false;
           return;
         }
-        
+
         console.log(`Checking status for job ${jobId}...`);
-        const response = await api.getResults(jobId);
+        const response = await api.getResults(jobId, true); // Always force refresh when polling
+        if (!response || !response.data) {
+          throw new Error("No response or response.data from getResults");
+        }
         const data = response.data;
-        
+
         // Reset failed attempts counter on success
         failedAttempts = 0;
-        
+
         // Update processing status
         setProcessingStatus(data.status);
-        
+
         // Handle different statuses
         if (data.status === 'completed') {
           console.log("Processing completed, updating results");
           setResults(data);
-          clearInterval(interval);
+          clearInterval(pollingIntervalId);
         } else if (terminalStates.includes(data.status)) {
           console.log(`Job ${jobId} reached terminal state: ${data.status}. Stopping polling.`);
-          clearInterval(interval);
-          
+          clearInterval(pollingIntervalId);
+
           // Show appropriate error messages
           if (data.status === 'not_found') {
             setErrorMessage("The requested job could not be found. It may have been deleted or expired.");
@@ -248,23 +217,25 @@ const MainContent = () => {
         }
       } catch (error) {
         console.error("Failed to check job status:", error);
-        
+
         // Increment failed attempts counter
         failedAttempts++;
-        
+
         // If we've failed too many times in a row, stop polling
         if (failedAttempts >= maxFailedAttempts) {
           console.log(`Too many failed attempts (${failedAttempts}). Stopping polling.`);
-          clearInterval(interval);
+          clearInterval(pollingIntervalId);
           setErrorMessage("Failed to check processing status. Please try again later.");
           setShowError(true);
         }
       } finally {
         isRequestActive = false;
       }
-    }, baseInterval); // Start with checking every 5 seconds
-    
-    return () => clearInterval(interval);
+    };
+
+    pollingIntervalId = setInterval(pollJobStatus, baseInterval);
+
+    return () => clearInterval(pollingIntervalId);
   }, [jobId, processingStatus]);
 
   // Handle file upload success
@@ -290,7 +261,7 @@ const MainContent = () => {
     setJobId(scanJobId);
     
     // Fetch the scan results
-    api.getResults(scanJobId)
+    api.getResults(scanJobId, true)
       .then(response => {
         setResults(response.data);
         setProcessingStatus(response.data.status);
@@ -325,12 +296,31 @@ const MainContent = () => {
     return (
       <>
         <UploadForm onUploadSuccess={handleUploadSuccess} />
+        {/* Show job status indicator if a job is active */}
         {jobId && (
-          <ResultViewer 
-            jobId={jobId} 
-            status={processingStatus} 
-            results={results} 
-          />
+          <>
+            <Box sx={{ mb: 2, textAlign: 'center' }}>
+              <span style={{
+                display: 'inline-block',
+                padding: '6px 16px',
+                borderRadius: 16,
+                background: '#e3f2fd',
+                color: '#1976d2',
+                fontWeight: 500,
+                fontSize: 16,
+                marginBottom: 8,
+                border: '1px solid #90caf9',
+                letterSpacing: 1
+              }}>
+                Job Status: {processingStatus || 'unknown'}
+              </span>
+            </Box>
+            <ResultViewer 
+              jobId={jobId} 
+              status={processingStatus} 
+              results={results} 
+            />
+          </>
         )}
       </>
     );
