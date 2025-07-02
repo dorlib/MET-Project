@@ -155,3 +155,19 @@ class ScanRepository:
             query = query.filter(Scan.created_at <= filters['end_date'])
         
         return query.count()
+
+    @staticmethod
+    def delete_scan(db: Session, job_id: str) -> bool:
+        """
+        Delete a scan by job_id
+        """
+        try:
+            scan = db.query(Scan).filter(Scan.job_id == job_id).first()
+            if scan:
+                db.delete(scan)
+                db.commit()
+                return True
+            return False
+        except Exception as e:
+            db.rollback()
+            raise e

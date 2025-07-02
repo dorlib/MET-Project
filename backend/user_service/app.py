@@ -271,6 +271,115 @@ def direct_get_user():
     # Return error for unauthenticated requests
     return jsonify({"error": "Authentication required"}), 401
 
+# Direct implementation of /user/settings endpoint
+@app.route('/user/settings', methods=['GET'])
+def direct_get_user_settings():
+    """Get the authenticated user's settings including 2FA status."""
+    # Check for authentication header
+    auth_header = request.headers.get('Authorization')
+    
+    # If there's an auth header, try to verify it
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ')[1]
+        from utils.jwt_util import verify_token
+        
+        payload = verify_token(token)
+        if payload:
+            # Get user by ID from token
+            user_id = payload.get('user_id')
+            from services.services import UserService
+            from utils.database import get_db
+            db = next(get_db())
+            
+            user_data = UserService.get_user_by_id(db, user_id)
+            if user_data:
+                # Return user settings - for now just 2FA status
+                return jsonify({
+                    "two_fa_enabled": user_data.get('two_fa_enabled', False),
+                    "email_notifications": user_data.get('email_notifications', True),
+                    "scan_history_limit": user_data.get('scan_history_limit', 100)
+                })
+    
+    # Return error for unauthenticated requests
+    return jsonify({"error": "Authentication required"}), 401
+
+# Direct implementation of /user/scans endpoint
+@app.route('/user/scans', methods=['GET'])
+def direct_get_user_scans():
+    """Get all scans for the authenticated user with pagination."""
+    # Check for authentication header
+    auth_header = request.headers.get('Authorization')
+    
+    # If there's an auth header, try to verify it
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ')[1]
+        from utils.jwt_util import verify_token
+        
+        payload = verify_token(token)
+        if payload:
+            # Get user ID from token
+            user_id = payload.get('user_id')
+            
+            # Get pagination parameters
+            try:
+                page = int(request.args.get('page', 1))
+                per_page = int(request.args.get('per_page', 10))
+            except ValueError:
+                page = 1
+                per_page = 10
+            
+            # Get scans for the user
+            from services.services import ScanService
+            from utils.database import get_db
+            db = next(get_db())
+            
+            try:
+                result = ScanService.get_user_scans(db, user_id, page, per_page)
+                
+                if result["success"]:
+                    return jsonify(result["data"])
+                else:
+                    return jsonify({"error": result["error"]}), 500
+            except Exception as e:
+                return jsonify({"error": f"Error retrieving scans: {str(e)}"}), 500
+    
+    # Return error for unauthenticated requests
+    return jsonify({"error": "Authentication required"}), 401
+
+# Direct implementation of /scan/<job_id> endpoint for scan details
+@app.route('/scan/<job_id>', methods=['GET'])
+def direct_get_scan_details(job_id):
+    """Get detailed information about a specific scan."""
+    # Check for authentication header
+    auth_header = request.headers.get('Authorization')
+    
+    # If there's an auth header, try to verify it
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ')[1]
+        from utils.jwt_util import verify_token
+        
+        payload = verify_token(token)
+        if payload:
+            # Get user by ID from token
+            user_id = payload.get('user_id')
+            from services.services import ScanService
+            from utils.database import get_db
+            db = next(get_db())
+            
+            try:
+                # Get the scan details
+                scan = ScanService.get_scan_by_job_id(db, job_id, user_id)
+                
+                if scan["success"]:
+                    return jsonify(scan["data"])
+                else:
+                    return jsonify({"error": scan["error"]}), scan["status_code"]
+            except Exception as e:
+                return jsonify({"error": f"Error retrieving scan details: {str(e)}"}), 500
+    
+    # Return error for unauthenticated requests
+    return jsonify({"error": "Authentication required"}), 401
+
 # Direct implementation of /scans/<job_id> endpoint
 @app.route('/scans/<job_id>', methods=['PUT'])
 def direct_update_scan(job_id):

@@ -7,6 +7,7 @@ import UploadForm from './components/UploadForm';
 import ResultViewer from './components/ResultViewer';
 import AuthPage from './components/AuthPage';
 import UserProfile from './components/UserProfile';
+import ScanDetails from './components/ScanDetails';
 import ErrorNotification from './components/ErrorNotification';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import api from './services/api';
@@ -256,16 +257,21 @@ const MainContent = () => {
     setCurrentView(view);
   };
 
+  // Handle navigation back to profile from scan details
+  const handleBackToProfile = () => {
+    setCurrentView('profile');
+  };
+
   // Handle viewing a specific scan from history
   const handleViewScan = (scanJobId) => {
     setJobId(scanJobId);
+    setCurrentView('scan-details'); // Navigate to dedicated scan details view
     
     // Fetch the scan results
     api.getResults(scanJobId, true)
       .then(response => {
         setResults(response.data);
         setProcessingStatus(response.data.status);
-        setCurrentView('upload'); // Switch to upload view to show results
       })
       .catch(error => {
         console.error("Failed to fetch scan results:", error);
@@ -290,6 +296,17 @@ const MainContent = () => {
     
     if (currentView === 'profile') {
       return <UserProfile onViewScan={handleViewScan} />;
+    }
+
+    if (currentView === 'scan-details') {
+      return (
+        <ScanDetails 
+          jobId={jobId}
+          onNavigateBack={handleBackToProfile}
+          results={results}
+          status={processingStatus}
+        />
+      );
     }
     
     // Default to upload/results view

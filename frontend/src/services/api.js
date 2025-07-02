@@ -213,6 +213,18 @@ const apiService = {
     return api.get('/user/scans');
   },
   
+  // Add missing getUserScans function with pagination support
+  getUserScans: (page = 1, perPage = 10) => {
+    return api.get('/user/scans', {
+      params: { page, per_page: perPage }
+    });
+  },
+
+  // Add missing getUserSettings function
+  getUserSettings: () => {
+    return api.get('/user/settings');
+  },
+
   deleteScan: (scanId) => {
     return api.delete(`/user/scans/${scanId}`);
   },

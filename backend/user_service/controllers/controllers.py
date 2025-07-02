@@ -108,6 +108,84 @@ def get_user():
         logger.error(f"Error in get_user: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
 
+@user_bp.route('/user/settings', methods=['GET'])
+def get_user_settings():
+    """Get the authenticated user's settings including 2FA status."""
+    try:
+        auth_header = request.headers.get('Authorization')
+        
+        # Check if auth header exists and has the correct format
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Authentication token is missing"}), 401
+        
+        # Extract and verify the token
+        token = auth_header.split(' ')[1]
+        payload = verify_token(token)
+        
+        if not payload:
+            return jsonify({"error": "Invalid authentication token"}), 401
+        
+        # Get user by ID from the token
+        db = next(get_db())
+        user_id = payload.get('user_id')
+        user_data = UserService.get_user_by_id(db, user_id)
+        
+        if not user_data:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Return user settings - for now just 2FA status
+        return jsonify({
+            "two_fa_enabled": user_data.get('two_fa_enabled', False),
+            "email_notifications": user_data.get('email_notifications', True),
+            "scan_history_limit": user_data.get('scan_history_limit', 100)
+        }), 200
+    except Exception as e:
+        logger.error(f"Error in get_user_settings: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@user_bp.route('/user/scans', methods=['GET'])
+def get_user_scans():
+    """Get all scans for the authenticated user with pagination."""
+    try:
+        auth_header = request.headers.get('Authorization')
+        
+        # Check if auth header exists and has the correct format
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Authentication token is missing"}), 401
+        
+        # Extract and verify the token
+        token = auth_header.split(' ')[1]
+        payload = verify_token(token)
+        
+        if not payload:
+            return jsonify({"error": "Invalid authentication token"}), 401
+        
+        # Get user by ID from the token
+        db = next(get_db())
+        user_id = payload.get('user_id')
+        user_data = UserService.get_user_by_id(db, user_id)
+        
+        if not user_data:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Get pagination parameters
+        try:
+            page = int(request.args.get('page', 1))
+            per_page = int(request.args.get('per_page', 10))
+        except ValueError:
+            return jsonify({"error": "Invalid pagination parameters"}), 400
+        
+        # Get scans for the user
+        result = ScanService.get_user_scans(db, user_id, page, per_page)
+        
+        if result["success"]:
+            return jsonify(result["data"]), result["status_code"]
+        else:
+            return jsonify({"error": result["error"]}), result["status_code"]
+    except Exception as e:
+        logger.error(f"Error in get_user_scans: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
 # Scan endpoints
 @scan_bp.route('/scans', methods=['POST'])
 def create_scan():
@@ -191,11 +269,6 @@ def get_scans():
         logger.error(f"Error in get_scans: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
 
-@scan_bp.route('/test', methods=['GET'])
-def scan_test():
-    """Test endpoint on the scan blueprint."""
-    return jsonify({"message": "This is a test endpoint on the scan blueprint"}), 200
-
 @scan_bp.route('/scans/filter', methods=['GET'])
 def filter_scans():
     """Filter scans for the authenticated user."""
@@ -258,3 +331,39 @@ def health():
         "status": "healthy",
         "service": "user-service"
     })
+
+@scan_bp.route('/scans/<job_id>', methods=['DELETE'])
+def delete_scan(job_id):
+    """Delete a scan for the authenticated user."""
+    try:
+        auth_header = request.headers.get('Authorization')
+        
+        # Check if auth header exists and has the correct format
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Authentication token is missing"}), 401
+        
+        # Extract and verify the token
+        token = auth_header.split(' ')[1]
+        payload = verify_token(token)
+        
+        if not payload:
+            return jsonify({"error": "Invalid authentication token"}), 401
+        
+        # Get user by ID from the token
+        db = next(get_db())
+        user_id = payload.get('user_id')
+        user_data = UserService.get_user_by_id(db, user_id)
+        
+        if not user_data:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Delete the scan
+        result = ScanService.delete_scan(db, job_id, user_id)
+        
+        if result["success"]:
+            return jsonify({"message": "Scan deleted successfully"}), result["status_code"]
+        else:
+            return jsonify({"error": result["error"]}), result["status_code"]
+    except Exception as e:
+        logger.error(f"Error in delete_scan: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500

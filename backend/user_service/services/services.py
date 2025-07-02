@@ -200,3 +200,73 @@ class ScanService:
             }
         except Exception as e:
             return {"success": False, "error": str(e), "status_code": 500}
+    
+    @staticmethod
+    def delete_scan(db: Session, job_id: str, user_id: int) -> Dict:
+        """
+        Delete a scan record for a specific user
+        """
+        try:
+            # First check if the scan exists and belongs to the user
+            scan = ScanRepository.get_scan_by_job_id(db, job_id)
+            if not scan:
+                return {"success": False, "error": "Scan not found", "status_code": 404}
+            
+            # Check if the scan belongs to the user (if user_email is stored)
+            # This is a security measure to prevent users from deleting other users' scans
+            if hasattr(scan, 'user_id') and scan.user_id != user_id:
+                return {"success": False, "error": "Unauthorized to delete this scan", "status_code": 403}
+            
+            # Delete the scan
+            success = ScanRepository.delete_scan(db, job_id)
+            
+            if success:
+                return {
+                    "success": True,
+                    "data": {"message": "Scan deleted successfully", "job_id": job_id},
+                    "status_code": 200
+                }
+            else:
+                return {"success": False, "error": "Failed to delete scan", "status_code": 500}
+                
+        except Exception as e:
+            return {"success": False, "error": str(e), "status_code": 500}
+    
+    @staticmethod
+    def get_scan_by_job_id(db: Session, job_id: str, user_id: int) -> Dict:
+        """
+        Get a specific scan by job_id for a user with enhanced details
+        """
+        try:
+            # Get the scan
+            scan = ScanRepository.get_scan_by_job_id(db, job_id)
+            if not scan:
+                return {"success": False, "error": "Scan not found", "status_code": 404}
+            
+            # Security check - ensure the scan belongs to the user (if user_id is stored)
+            if hasattr(scan, 'user_id') and scan.user_id and scan.user_id != user_id:
+                return {"success": False, "error": "Unauthorized to access this scan", "status_code": 403}
+            
+            # Convert to dict and add additional metadata
+            scan_data = scan.to_dict()
+            
+            # Add additional computed fields for the details view
+            scan_data['processing_duration'] = None
+            if scan.created_at and scan.updated_at:
+                duration = scan.updated_at - scan.created_at
+                scan_data['processing_duration'] = duration.total_seconds()
+            
+            # Add file size info if available
+            scan_data['file_info'] = {
+                'name': scan.file_name,
+                'type': 'nii' if scan.file_name.endswith(('.nii', '.nii.gz')) else 'npy'
+            }
+            
+            return {
+                "success": True,
+                "data": scan_data,
+                "status_code": 200
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e), "status_code": 500}
