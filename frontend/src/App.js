@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Container, CssBaseline, ThemeProvider, createTheme, Box, IconButton } from '@mui/material';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import Header from './components/Header';
@@ -110,14 +111,65 @@ const getThemeOptions = (mode) => ({
   },
 });
 
+// HomePage component for the main upload/results view
+const HomePage = ({ jobId, processingStatus, results, onUploadSuccess }) => {
+  return (
+    <>
+      <UploadForm onUploadSuccess={onUploadSuccess} />
+      {/* Show job status indicator if a job is active */}
+      {jobId && (
+        <>
+          <Box sx={{ mb: 2, textAlign: 'center' }}>
+            <span style={{
+              display: 'inline-block',
+              padding: '6px 16px',
+              borderRadius: 16,
+              background: '#e3f2fd',
+              color: '#1976d2',
+              fontWeight: 500,
+              fontSize: 16,
+              marginBottom: 8,
+              border: '1px solid #90caf9',
+              letterSpacing: 1
+            }}>
+              Job Status: {processingStatus || 'unknown'}
+            </span>
+          </Box>
+          <ResultViewer 
+            jobId={jobId} 
+            status={processingStatus} 
+            results={results} 
+          />
+        </>
+      )}
+    </>
+  );
+};
+
+// ScanDetailsPage component that gets the scan ID from URL parameters
+const ScanDetailsPage = () => {
+  const { scanId } = useParams();
+  const navigate = useNavigate();
+
+  const handleNavigateBack = () => {
+    navigate('/profile');
+  };
+
+  return (
+    <ScanDetails 
+      jobId={scanId}
+      onNavigateBack={handleNavigateBack}
+    />
+  );
+};
+
 // Main application content
 const MainContent = () => {
   const [jobId, setJobId] = useState(null);
   const [processingStatus, setProcessingStatus] = useState(null);
   const [results, setResults] = useState(null);
-  const [currentView, setCurrentView] = useState('upload'); // 'upload', 'profile', 'auth'
   const { currentUser } = useAuth();
-  const { toggleColorMode, mode } = React.useContext(ColorModeContext);
+  const navigate = useNavigate();
   
   // Error notification state
   const [errorMessage, setErrorMessage] = useState('');
@@ -244,7 +296,6 @@ const MainContent = () => {
     setJobId(data.job_id);
     setProcessingStatus(data.status);
     setResults(null);
-    setCurrentView('upload'); // Switch to upload view to show results
     
     // Show a notification that processing has started
     setErrorMessage("Scan uploaded successfully. Processing has begun.");
@@ -252,34 +303,6 @@ const MainContent = () => {
     setErrorSeverity('success'); // Use success severity for this notification
   };
 
-  // Handle navigation to different views
-  const navigateTo = (view) => {
-    setCurrentView(view);
-  };
-
-  // Handle navigation back to profile from scan details
-  const handleBackToProfile = () => {
-    setCurrentView('profile');
-  };
-
-  // Handle viewing a specific scan from history
-  const handleViewScan = (scanJobId) => {
-    setJobId(scanJobId);
-    setCurrentView('scan-details'); // Navigate to dedicated scan details view
-    
-    // Fetch the scan results
-    api.getResults(scanJobId, true)
-      .then(response => {
-        setResults(response.data);
-        setProcessingStatus(response.data.status);
-      })
-      .catch(error => {
-        console.error("Failed to fetch scan results:", error);
-        setErrorMessage("Failed to fetch scan results. Please try again later.");
-        setShowError(true);
-      });
-  };
-  
   // Handle error notification close
   const handleErrorClose = (event, reason) => {
     if (reason === 'clickaway') return;
@@ -288,71 +311,56 @@ const MainContent = () => {
     setTimeout(() => setErrorSeverity('error'), 300);
   };
 
-  // Render the current view
-  const renderCurrentView = () => {
-    if (currentView === 'auth') {
-      return <AuthPage />;
-    }
-    
-    if (currentView === 'profile') {
-      return <UserProfile onViewScan={handleViewScan} />;
-    }
-
-    if (currentView === 'scan-details') {
-      return (
-        <ScanDetails 
-          jobId={jobId}
-          onNavigateBack={handleBackToProfile}
-          results={results}
-          status={processingStatus}
-        />
-      );
-    }
-    
-    // Default to upload/results view
-    return (
-      <>
-        <UploadForm onUploadSuccess={handleUploadSuccess} />
-        {/* Show job status indicator if a job is active */}
-        {jobId && (
-          <>
-            <Box sx={{ mb: 2, textAlign: 'center' }}>
-              <span style={{
-                display: 'inline-block',
-                padding: '6px 16px',
-                borderRadius: 16,
-                background: '#e3f2fd',
-                color: '#1976d2',
-                fontWeight: 500,
-                fontSize: 16,
-                marginBottom: 8,
-                border: '1px solid #90caf9',
-                letterSpacing: 1
-              }}>
-                Job Status: {processingStatus || 'unknown'}
-              </span>
-            </Box>
-            <ResultViewer 
-              jobId={jobId} 
-              status={processingStatus} 
-              results={results} 
-            />
-          </>
-        )}
-      </>
-    );
-  };
-
   return (
     <Box>
       <Header 
         isAuthenticated={!!currentUser} 
         userName={currentUser?.name}
-        onNavigate={navigateTo}
-        currentView={currentView}
       />
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        {renderCurrentView()}
+        <Routes>
+          <Route 
+            path="/" 
+            element={
+              <HomePage 
+                jobId={jobId}
+                processingStatus={processingStatus}
+                results={results}
+                onUploadSuccess={handleUploadSuccess}
+              />
+            } 
+          />
+          <Route 
+            path="/profile" 
+            element={
+              currentUser ? (
+                <UserProfile />
+              ) : (
+                <Navigate to="/auth" replace />
+              )
+            } 
+          />
+          <Route 
+            path="/scan/:scanId" 
+            element={
+              currentUser ? (
+                <ScanDetailsPage />
+              ) : (
+                <Navigate to="/auth" replace />
+              )
+            } 
+          />
+          <Route 
+            path="/auth" 
+            element={
+              currentUser ? (
+                <Navigate to="/" replace />
+              ) : (
+                <AuthPage />
+              )
+            } 
+          />
+        </Routes>
       </Container>
       
       {/* Global error notification */}
@@ -393,7 +401,9 @@ function App() {
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <AuthProvider>
-          <MainContent />
+          <Router>
+            <MainContent />
+          </Router>
         </AuthProvider>
       </ThemeProvider>
     </ColorModeContext.Provider>

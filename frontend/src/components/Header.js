@@ -21,15 +21,18 @@ import {
   Brightness4 as Brightness4Icon,
   Brightness7 as Brightness7Icon
 } from '@mui/icons-material';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { ColorModeContext } from '../App';
 
-const Header = ({ isAuthenticated, userName, onNavigate, currentView }) => {
+const Header = ({ isAuthenticated, userName }) => {
   const [anchorEl, setAnchorEl] = React.useState(null);
   const open = Boolean(anchorEl);
   const { logout } = useAuth();
   const theme = useTheme();
   const colorMode = React.useContext(ColorModeContext);
+  const navigate = useNavigate();
+  const location = useLocation();
   
   const handleMenu = (event) => {
     setAnchorEl(event.currentTarget);
@@ -42,12 +45,12 @@ const Header = ({ isAuthenticated, userName, onNavigate, currentView }) => {
   const handleLogout = async () => {
     handleClose();
     await logout();
-    onNavigate('auth');
+    navigate('/auth');
   };
 
-  const navigateTo = (view) => {
+  const navigateTo = (path) => {
     handleClose();
-    onNavigate(view);
+    navigate(path);
   };
 
   const getInitials = (name) => {
@@ -67,7 +70,7 @@ const Header = ({ isAuthenticated, userName, onNavigate, currentView }) => {
           variant="h6" 
           component="div"
           sx={{ cursor: 'pointer' }}
-          onClick={() => onNavigate('upload')}
+          onClick={() => navigate('/')}
         >
           Brain Metastasis Analysis
         </Typography>
@@ -93,10 +96,10 @@ const Header = ({ isAuthenticated, userName, onNavigate, currentView }) => {
           
           <IconButton 
             color="inherit" 
-            onClick={() => onNavigate('upload')}
+            onClick={() => navigate('/')}
             sx={{ 
               mr: 1, 
-              bgcolor: currentView === 'upload' ? 'rgba(255,255,255,0.2)' : 'transparent' 
+              bgcolor: location.pathname === '/' ? 'rgba(255,255,255,0.2)' : 'transparent' 
             }}
           >
             <HomeIcon />
@@ -115,7 +118,7 @@ const Header = ({ isAuthenticated, userName, onNavigate, currentView }) => {
                   sx={{ 
                     width: 32, 
                     height: 32,
-                    bgcolor: currentView === 'profile' ? 'primary.light' : 'primary.dark'
+                    bgcolor: location.pathname === '/profile' ? 'primary.light' : 'primary.dark'
                   }}
                 >
                   {getInitials(userName)}
@@ -137,8 +140,8 @@ const Header = ({ isAuthenticated, userName, onNavigate, currentView }) => {
                 open={open}
                 onClose={handleClose}
               >
-                <MenuItem onClick={() => navigateTo('profile')}>My Profile</MenuItem>
-                <MenuItem onClick={() => navigateTo('upload')}>New Analysis</MenuItem>
+                <MenuItem onClick={() => navigateTo('/profile')}>My Profile</MenuItem>
+                <MenuItem onClick={() => navigateTo('/')}>New Analysis</MenuItem>
                 <Divider />
                 <MenuItem onClick={handleLogout}>Logout</MenuItem>
               </Menu>
@@ -147,7 +150,7 @@ const Header = ({ isAuthenticated, userName, onNavigate, currentView }) => {
             <Button 
               color="inherit" 
               startIcon={<LoginIcon />} 
-              onClick={() => onNavigate('auth')}
+              onClick={() => navigate('/auth')}
             >
               Login
             </Button>

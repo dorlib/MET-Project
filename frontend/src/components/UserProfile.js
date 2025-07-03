@@ -42,6 +42,7 @@ import {
   Delete,
   Warning
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import { format } from 'date-fns';
@@ -49,8 +50,9 @@ import TablePagination from '@mui/material/TablePagination';
 import TwoFactorSetup from './TwoFactorSetup';
 import ScanFilter from './ScanFilter';
 
-const UserProfile = ({ onViewScan }) => {
+const UserProfile = () => {
   const { currentUser, logout } = useAuth();
+  const navigate = useNavigate();
   const [scans, setScans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -346,7 +348,7 @@ const UserProfile = ({ onViewScan }) => {
                                 </Typography>
                                 <Button 
                                   size="small" 
-                                  onClick={() => onViewScan(scan.job_id)}
+                                  onClick={() => navigate(`/scan/${scan.job_id}`)}
                                 >
                                   View Details
                                 </Button>

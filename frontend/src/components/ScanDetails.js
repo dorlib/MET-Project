@@ -39,18 +39,35 @@ import ResultViewer from './ResultViewer';
 import api from '../services/api';
 
 const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
-  const [scanInfo, setScanInfo] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [scanInfo, setScanInfo] = useState(results || null);
+  const [scanStatus, setScanStatus] = useState(status || null);
+  const [loading, setLoading] = useState(!results);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchScanInfo = async () => {
+      if (results && status) {
+        // If results are already provided, use them
+        setScanInfo(results);
+        setScanStatus(status);
+        setLoading(false);
+        return;
+      }
+
+      if (!jobId) {
+        setError('No scan ID provided');
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
-        // Fetch additional scan information if needed
-        // For now, we'll use the results data that's passed in
-        if (results) {
-          setScanInfo(results);
+        const response = await api.getResults(jobId, true);
+        if (response && response.data) {
+          setScanInfo(response.data);
+          setScanStatus(response.data.status);
+        } else {
+          setError('Failed to load scan details');
         }
       } catch (err) {
         console.error('Error fetching scan info:', err);
@@ -60,10 +77,8 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
       }
     };
 
-    if (jobId) {
-      fetchScanInfo();
-    }
-  }, [jobId, results]);
+    fetchScanInfo();
+  }, [jobId, results, status]);
 
   // Format date for display
   const formatDate = (dateString) => {
@@ -156,7 +171,7 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
             </Typography>
           </Box>
           <Box sx={{ textAlign: 'right' }}>
-            {getStatusChip(status)}
+            {getStatusChip(scanStatus)}
           </Box>
         </Box>
         
@@ -194,7 +209,7 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
                   </ListItemIcon>
                   <ListItemText 
                     primary="File Name" 
-                    secondary={results?.file_name || 'Unknown'} 
+                    secondary={scanInfo?.file_name || 'Unknown'} 
                   />
                 </ListItem>
                 
@@ -204,7 +219,7 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
                   </ListItemIcon>
                   <ListItemText 
                     primary="Processed Date" 
-                    secondary={results?.created_at ? formatDate(results.created_at) : 'Unknown'} 
+                    secondary={scanInfo?.created_at ? formatDate(scanInfo.created_at) : 'Unknown'} 
                   />
                 </ListItem>
                 
@@ -214,7 +229,7 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
                   </ListItemIcon>
                   <ListItemText 
                     primary="Status" 
-                    secondary={status || 'Unknown'} 
+                    secondary={scanStatus || 'Unknown'} 
                   />
                 </ListItem>
               </List>
@@ -222,7 +237,7 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
           </Card>
 
           {/* Analysis Results Summary */}
-          {status === 'completed' && results && (
+          {scanStatus === 'completed' && scanInfo && (
             <Card sx={{ mb: 3 }}>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
@@ -235,28 +250,28 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
                     Metastases Detected
                   </Typography>
                   <Typography variant="h3" color="primary.main" sx={{ fontWeight: 600 }}>
-                    {results.metastasis_count || 0}
+                    {scanInfo.metastasis_count || 0}
                   </Typography>
                 </Box>
                 
-                {results.total_volume && (
+                {scanInfo.total_volume && (
                   <Box sx={{ mb: 2 }}>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       Total Volume
                     </Typography>
                     <Typography variant="h5" color="secondary.main" sx={{ fontWeight: 600 }}>
-                      {results.total_volume.toFixed(2)} mm³
+                      {scanInfo.total_volume.toFixed(2)} mm³
                     </Typography>
                   </Box>
                 )}
                 
-                {results.metastasis_volumes && results.metastasis_volumes.length > 0 && (
+                {scanInfo.metastasis_volumes && scanInfo.metastasis_volumes.length > 0 && (
                   <Box>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       Individual Volumes
                     </Typography>
                     <Box sx={{ maxHeight: 150, overflow: 'auto' }}>
-                      {results.metastasis_volumes.map((volume, index) => (
+                      {scanInfo.metastasis_volumes.map((volume, index) => (
                         <Chip
                           key={index}
                           label={`${volume.toFixed(2)} mm³`}
@@ -320,8 +335,8 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
               
               <ResultViewer 
                 jobId={jobId} 
-                status={status} 
-                results={results}
+                status={scanStatus} 
+                results={scanInfo}
               />
             </CardContent>
           </Card>
