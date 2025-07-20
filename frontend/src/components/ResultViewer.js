@@ -46,6 +46,8 @@ const ResultViewer = ({ jobId, status, results }) => {
   
   // Additional state for 2D view types (axial, coronal, sagittal)
   const [viewType, setViewType] = useState('axial');
+  // Store all volume dimensions to handle different view orientations
+  const [volumeDimensions, setVolumeDimensions] = useState(null);
   // Additional state for three-plane view
   const [axialSliceIndex, setAxialSliceIndex] = useState(50);
   const [coronalSliceIndex, setCoronalSliceIndex] = useState(50);
@@ -245,6 +247,32 @@ const ResultViewer = ({ jobId, status, results }) => {
     }
   }, [sliceIndex, jobId, sliceInitialized, ensureValidSlice]);
   
+  // Update max slice index when view type changes
+  useEffect(() => {
+    if (volumeDimensions && volumeDimensions.length >= 3) {
+      let newMaxSliceIndex;
+      
+      // Set max slice index based on view orientation
+      if (viewType === 'coronal') {
+        // Coronal view: slice along anterior-posterior axis (dimension 1)
+        newMaxSliceIndex = volumeDimensions[1] - 1;
+      } else if (viewType === 'sagittal') {
+        // Sagittal view: slice along left-right axis (dimension 2)
+        newMaxSliceIndex = volumeDimensions[2] - 1;
+      } else {
+        // Axial view: slice along superior-inferior axis (dimension 0)
+        newMaxSliceIndex = volumeDimensions[0] - 1;
+      }
+      
+      console.log(`View type changed to ${viewType}, updating maxSliceIndex to ${newMaxSliceIndex}`);
+      setMaxSliceIndex(newMaxSliceIndex);
+      
+      // Reset slice index to middle of new range
+      const middleSlice = Math.floor(newMaxSliceIndex / 2);
+      setSliceIndex(middleSlice);
+    }
+  }, [viewType, volumeDimensions]);
+
   // Function to fetch volume dimensions from the backend
   // Function has been moved inside the useEffect below
   
@@ -261,8 +289,12 @@ const ResultViewer = ({ jobId, status, results }) => {
           console.log("Volume dimensions data:", data);
           
           if (data.dimensions && data.dimensions.length > 0) {
-            // Update max slice index based on z-dimension (depth)
-            const newMaxSliceIndex = data.dimensions[0] - 1; // 0-based index
+            // Store all volume dimensions for different view orientations
+            console.log("Setting volume dimensions:", data.dimensions);
+            setVolumeDimensions(data.dimensions);
+            
+            // Update max slice index based on current view type (initially axial)
+            const newMaxSliceIndex = data.dimensions[0] - 1; // Axial by default
             console.log("Setting maxSliceIndex to:", newMaxSliceIndex);
             setMaxSliceIndex(newMaxSliceIndex);
             
@@ -292,6 +324,9 @@ const ResultViewer = ({ jobId, status, results }) => {
         } else {
           // If the endpoint doesn't exist or fails, use volume stats from results
           if (results && results.volume_dimensions) {
+            console.log("Using results volume_dimensions:", results.volume_dimensions);
+            setVolumeDimensions(results.volume_dimensions);
+            
             const newMaxSliceIndex = results.volume_dimensions[0] - 1;
             console.log("Using results volume_dimensions, setting maxSliceIndex to:", newMaxSliceIndex);
             setMaxSliceIndex(newMaxSliceIndex);
@@ -671,7 +706,7 @@ const ResultViewer = ({ jobId, status, results }) => {
                       e.target.dataset.fallbackAttempted = 'true';
                       console.log('Retrying with fallback URL');
                       // Try showing the original image without segmentation
-                      const fallbackUrl = `/visualization/${jobId}?quality=high&upscale=2&enhance_contrast=true&enhance_edges=true&type=${vizType}&slice_idx=${ensureValidSlice(sliceIndex)}&show_original=true&brightness=1.5&contrast=1.8`;
+                      const fallbackUrl = `/visualization/${jobId}?quality=high&upscale=2&enhance_contrast=true&enhance_edges=true&type=${vizType}&slice_idx=${ensureValidSlice(sliceIndex)}&view_type=${viewType}&show_original=true&brightness=1.5&contrast=1.8`;
                       e.target.src = fallbackUrl;
                     } else {
                       // Hide spinner on failure

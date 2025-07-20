@@ -227,9 +227,14 @@ def process_prediction_sync(file_path: str, job_id: str):
                 
                 with torch.no_grad():
                     out = MODEL(x)  # shape: (1, num_classes, H, W, D)
+                    
+                    # Apply softmax to get probabilities
+                    probabilities = torch.softmax(out, dim=1).squeeze(0).cpu().numpy()  # shape: (num_classes, H, W, D)
+                    
+                    # Get final predictions
                     pred = torch.argmax(out, dim=1).squeeze(0).cpu().numpy().astype(np.uint8)
                     
-                logger.info(f"Model inference completed. Output shape: {pred.shape}")
+                logger.info(f"Model inference completed. Output shape: {pred.shape}, Probabilities shape: {probabilities.shape}")
             except Exception as e:
                 logger.error(f"Error during model inference: {str(e)}")
                 raise RuntimeError(f"Model inference failed: {str(e)}")
@@ -238,6 +243,12 @@ def process_prediction_sync(file_path: str, job_id: str):
         pred_path = os.path.join(RESULTS_DIR, f"{job_id}_prediction.npy")
         np.save(pred_path, pred)
         logger.info(f"Saved prediction to {pred_path} with shape {pred.shape}")
+        
+        # Save probabilities if they exist (from real model inference)
+        if 'probabilities' in locals():
+            prob_path = os.path.join(RESULTS_DIR, f"{job_id}_probabilities.npy")
+            np.save(prob_path, probabilities)
+            logger.info(f"Saved probabilities to {prob_path} with shape {probabilities.shape}")
         
         # Update job status to complete
         job_registry[job_id] = JobStatus(

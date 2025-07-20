@@ -19,7 +19,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from preprocessing import preprocess_nifti_t1ce_for_model
 
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS with explicit settings
+CORS(app, origins=['http://localhost:3000', 'http://127.0.0.1:3000'], 
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization'],
+     supports_credentials=True)
+
 logging.basicConfig(level=logging.INFO)
 
 MODEL_SERVICE_URL = os.environ.get('MODEL_SERVICE_URL', 'http://model-service:5001')
@@ -269,6 +275,7 @@ def get_results(job_id):
         "metastasis_count": analysis_data.get("metastasis_count"),
         "metastasis_volumes": analysis_data.get("metastasis_volumes"),
         "total_volume": analysis_data.get("total_volume"),
+        "confidence_metrics": analysis_data.get("confidence_metrics"),
     })
 
 @app.route('/advanced-analysis/<job_id>', methods=['GET'])
@@ -589,6 +596,44 @@ def get_user_scans():
         logging.error(f"Error fetching user scans: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/user/scans/<job_id>', methods=['DELETE'])
+@token_required
+def delete_user_scan(job_id):
+    """
+    Delete a specific scan for the authenticated user
+    """
+    try:
+        # Forward to user service with token
+        auth_header = request.headers.get('Authorization')
+        
+        response = requests.delete(
+            f"{USER_SERVICE_URL}/scans/{job_id}",
+            headers={"Authorization": auth_header}
+        )
+        return response.json(), response.status_code
+    except Exception as e:
+        logging.error(f"Error deleting scan: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/user/settings', methods=['GET'])
+@token_required
+def get_user_settings():
+    """
+    Get authenticated user's settings including 2FA status
+    """
+    try:
+        # Forward to user service with token
+        auth_header = request.headers.get('Authorization')
+        
+        response = requests.get(
+            f"{USER_SERVICE_URL}/user/settings",
+            headers={"Authorization": auth_header}
+        )
+        return response.json(), response.status_code
+    except Exception as e:
+        logging.error(f"Error fetching user settings: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 # 2FA endpoints have been removed
 
 @app.route('/export/csv/<job_id>', methods=['GET'])
@@ -598,8 +643,8 @@ def export_csv(job_id):
     Export scan results as CSV
     """
     try:
-        # First, get result data
-        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/results/{job_id}")
+        # First, get result data from the analyze endpoint
+        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}")
         
         if response.status_code != 200:
             return jsonify({"error": "Result not found or not processed yet"}), 404
@@ -646,8 +691,8 @@ def export_pdf(job_id):
     Export scan results as PDF
     """
     try:
-        # First, get result data
-        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/results/{job_id}")
+        # First, get result data from the analyze endpoint
+        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}")
         
         if response.status_code != 200:
             return jsonify({"error": "Result not found or not processed yet"}), 404

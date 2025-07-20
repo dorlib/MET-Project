@@ -27,9 +27,9 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 RESULTS_FOLDER = '/app/results'
-METASTASIS_CLASS = 1  # Class 1 is for metastasis in the simplified model
+METASTASIS_CLASS = 3  # Class 3 is for metastasis/tumor core in the model output
 EDEMA_CLASS = 2       # Class 2 is for edema
-TUMOR_CORE_CLASS = 3  # Class 3 is for tumor core (not used in simplified model)
+TUMOR_CORE_CLASS = 3  # Class 3 is for tumor core (same as metastasis)
 VOXEL_VOLUME_MM3 = 1.0  # Default voxel volume in mm³ (can be adjusted based on scan parameters)
 TISSUE_COLORS = {
     METASTASIS_CLASS: (1.0, 0.0, 0.0),       # Red for metastasis
@@ -64,7 +64,7 @@ def load_volume_data(file_path):
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 
-def create_colormap_visualization(segmentation, original_image=None, slice_idx=None):
+def create_colormap_visualization(segmentation, original_image=None, slice_idx=None, view_type='axial'):
     """
     Create a high-resolution colormap visualization of a segmentation mask
     
@@ -72,20 +72,61 @@ def create_colormap_visualization(segmentation, original_image=None, slice_idx=N
         segmentation: 3D segmentation mask
         original_image: Optional original 3D image
         slice_idx: Optional slice index, if None middle slice will be used
+        view_type: View orientation ('axial', 'coronal', 'sagittal')
         
     Returns:
         PIL Image object containing the visualization
     """
+    # Handle different view orientations by adjusting the axis
+    if view_type.lower() == 'coronal':
+        # Coronal view: slice along the anterior-posterior axis (axis 1)
+        axis_index = 1
+        max_slices = segmentation.shape[1]
+    elif view_type.lower() == 'sagittal':
+        # Sagittal view: slice along the left-right axis (axis 2)
+        axis_index = 2
+        max_slices = segmentation.shape[2]
+    else:
+        # Axial view (default): slice along the superior-inferior axis (axis 0)
+        axis_index = 0
+        max_slices = segmentation.shape[0]
+    
     # Determine which slice to use
     if slice_idx is None:
-        slice_idx = segmentation.shape[0] // 2  # Middle slice
+        slice_idx = max_slices // 2  # Middle slice
     
-    # Extract the requested slice
+    # Ensure slice index is within bounds
+    slice_idx = max(0, min(slice_idx, max_slices - 1))
+    
+    # Extract the requested slice based on view orientation
+    orig_slice = None  # Initialize to None
     if len(segmentation.shape) == 3:
-        mask_slice = segmentation[slice_idx, :, :]
+        if axis_index == 0:  # Axial
+            mask_slice = segmentation[slice_idx, :, :]
+            if original_image is not None and slice_idx < original_image.shape[0]:
+                orig_slice = original_image[slice_idx, :, :] if original_image.ndim == 3 else original_image[slice_idx, :, :, 0]
+        elif axis_index == 1:  # Coronal
+            mask_slice = segmentation[:, slice_idx, :]
+            if original_image is not None and slice_idx < original_image.shape[1]:
+                orig_slice = original_image[:, slice_idx, :] if original_image.ndim == 3 else original_image[:, slice_idx, :, 0]
+        else:  # Sagittal (axis_index == 2)
+            mask_slice = segmentation[:, :, slice_idx]
+            if original_image is not None and slice_idx < original_image.shape[2]:
+                orig_slice = original_image[:, :, slice_idx] if original_image.ndim == 3 else original_image[:, :, slice_idx, 0]
     else:
         # If the mask has an additional dimension (e.g., one-hot encoding)
-        mask_slice = np.argmax(segmentation[slice_idx, :, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[slice_idx, :, :]
+        if axis_index == 0:  # Axial
+            mask_slice = np.argmax(segmentation[slice_idx, :, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[slice_idx, :, :]
+            if original_image is not None and slice_idx < original_image.shape[0]:
+                orig_slice = original_image[slice_idx, :, :] if original_image.ndim == 3 else original_image[slice_idx, :, :, 0]
+        elif axis_index == 1:  # Coronal
+            mask_slice = np.argmax(segmentation[:, slice_idx, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[:, slice_idx, :]
+            if original_image is not None and slice_idx < original_image.shape[1]:
+                orig_slice = original_image[:, slice_idx, :] if original_image.ndim == 3 else original_image[:, slice_idx, :, 0]
+        else:  # Sagittal
+            mask_slice = np.argmax(segmentation[:, :, slice_idx], axis=-1) if segmentation.shape[-1] > 1 else segmentation[:, :, slice_idx]
+            if original_image is not None and slice_idx < original_image.shape[2]:
+                orig_slice = original_image[:, :, slice_idx] if original_image.ndim == 3 else original_image[:, :, slice_idx, 0]
     
     # Create a colored visualization
     colors = np.zeros((*mask_slice.shape, 4))
@@ -101,20 +142,15 @@ def create_colormap_visualization(segmentation, original_image=None, slice_idx=N
         colors[:] = (0, 0, 0, 0)
     
     # If original image provided, use it as background
-    if original_image is not None:
-        if slice_idx < original_image.shape[0]:
-            orig_slice = original_image[slice_idx]
-            # Normalize the original image for display
-            if orig_slice.min() != orig_slice.max():
-                orig_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
-                
-            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to enhance contrast
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            enhanced_slice = clahe.apply((orig_slice * 255).astype(np.uint8))
-            orig_slice = enhanced_slice / 255.0
-        else:
-            # If slice index out of range, create blank background
-            orig_slice = np.zeros_like(mask_slice, dtype=float)
+    if orig_slice is not None:
+        # Normalize the original image for display
+        if orig_slice.min() != orig_slice.max():
+            orig_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
+            
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to enhance contrast
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced_slice = clahe.apply((orig_slice * 255).astype(np.uint8))
+        orig_slice = enhanced_slice / 255.0
     else:
         # Create a grayscale background if no original image
         orig_slice = np.zeros_like(mask_slice, dtype=float)
@@ -138,8 +174,9 @@ def create_colormap_visualization(segmentation, original_image=None, slice_idx=N
     # Overlay the colormap visualization
     plt.imshow(colors, alpha=0.7, interpolation='nearest')
     
-    # Improved title with slice information
-    plt.title(f"Segmentation Visualization (Slice {slice_idx}/{segmentation.shape[0]-1})", fontsize=14)
+    # Improved title with slice information and view type
+    view_name = view_type.capitalize()
+    plt.title(f"{view_name} View - Segmentation (Slice {slice_idx}/{max_slices-1})", fontsize=14)
     plt.axis('off')  # Hide axes
     
     # Reduce padding to maximize image size
@@ -556,13 +593,17 @@ def analyze_segmentation(job_id):
     """
     Analyze a segmentation mask to count metastases and calculate their volumes
     """
+    logging.info(f"DEBUG: analyze_segmentation called with job_id: {job_id}")
+    
     if not job_id:
+        logging.info("DEBUG: No job_id provided")
         return jsonify({
             "error": "Missing job ID"
         }), 400
         
     # Validate job_id format to prevent path traversal
     if '/' in job_id or '\\' in job_id or '..' in job_id:
+        logging.info(f"DEBUG: Invalid job_id format: {job_id}")
         return jsonify({
             "error": "Invalid job ID format",
             "job_id": job_id
@@ -570,8 +611,10 @@ def analyze_segmentation(job_id):
     
     # Find the prediction file
     pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+    logging.info(f"DEBUG: Looking for prediction file at: {pred_path}")
     
     if not os.path.exists(pred_path):
+        logging.info(f"DEBUG: Prediction file not found: {pred_path}")
         logging.warning(f"Segmentation not found for job ID: {job_id}")
         return jsonify({
             "error": "Segmentation not found",
@@ -582,7 +625,9 @@ def analyze_segmentation(job_id):
         # Load the segmentation mask
         try:
             segmentation = np.load(pred_path)
+            logging.info(f"DEBUG: Segmentation loaded. Shape: {segmentation.shape}, unique values: {np.unique(segmentation)}")
         except Exception as e:
+            logging.info(f"DEBUG: Failed to load segmentation: {str(e)}")
             logging.error(f"Failed to load segmentation file for job {job_id}: {str(e)}")
             return jsonify({
                 "error": "Invalid segmentation data format",
@@ -590,18 +635,34 @@ def analyze_segmentation(job_id):
             }), 400
         
         # Extract metastasis areas (assuming class 3 represents metastasis)
+        logging.info(f"DEBUG: METASTASIS_CLASS = {METASTASIS_CLASS}")
         met_mask = (segmentation == METASTASIS_CLASS).astype(np.int32)
+        logging.info(f"DEBUG: Metastasis mask sum: {np.sum(met_mask)}")
         
         # Identify individual metastases using connected component analysis
         labeled_mask, num_features = ndimage.label(met_mask)
+        logging.info(f"DEBUG: Connected components found: {num_features}")
         
         # If no metastases found
         if num_features == 0:
+            logging.info("DEBUG: No metastases found, returning 0 count")
+            
+            # Still try to calculate confidence metrics for the overall segmentation
+            prob_path = os.path.join(RESULTS_FOLDER, f"{job_id}_probabilities.npy")
+            confidence_metrics = None
+            if os.path.exists(prob_path):
+                try:
+                    prob_maps = np.load(prob_path)
+                    confidence_metrics = calculate_confidence_metrics(prob_maps, segmentation)
+                except Exception as e:
+                    logging.warning(f"Could not calculate confidence metrics: {str(e)}")
+            
             return jsonify({
                 "job_id": job_id,
                 "metastasis_count": 0,
                 "metastasis_volumes": [],
                 "total_volume": 0.0,
+                "confidence_metrics": confidence_metrics,
                 "message": "No metastases detected"
             })
         
@@ -614,26 +675,46 @@ def analyze_segmentation(job_id):
             volume_mm3 = voxel_count * VOXEL_VOLUME_MM3
             volumes.append(float(volume_mm3))
         
+        logging.info(f"DEBUG: Calculated {len(volumes)} volumes: {volumes[:5]}")
+        
         # Sort volumes from largest to smallest
         volumes.sort(reverse=True)
         
+        # Try to load probability maps for confidence calculation
+        prob_path = os.path.join(RESULTS_FOLDER, f"{job_id}_probabilities.npy")
+        confidence_metrics = None
+        if os.path.exists(prob_path):
+            try:
+                prob_maps = np.load(prob_path)
+                confidence_metrics = calculate_confidence_metrics(prob_maps, segmentation)
+                logging.info(f"DEBUG: Confidence metrics calculated successfully")
+            except Exception as e:
+                logging.warning(f"Could not calculate confidence metrics: {str(e)}")
+        else:
+            logging.info(f"DEBUG: No probability maps found at: {prob_path}")
+
         # Save analysis results
         analysis_result = {
             "job_id": job_id,
             "metastasis_count": num_features,
             "metastasis_volumes": volumes,
             "total_volume": sum(volumes),
-            "average_volume": sum(volumes) / len(volumes) if volumes else 0
+            "average_volume": sum(volumes) / len(volumes) if volumes else 0,
+            "confidence_metrics": confidence_metrics
         }
+        
+        logging.info(f"DEBUG: Analysis result: {analysis_result}")
         
         # Save results to file for future reference
         with open(os.path.join(RESULTS_FOLDER, f"{job_id}_analysis.json"), 'w') as f:
             json.dump(analysis_result, f)
         
+        logging.info(f"DEBUG: Analysis file saved")
         logging.info(f"Analysis completed for job {job_id}: {num_features} metastases found")
         return jsonify(analysis_result)
     
     except Exception as e:
+        logging.info(f"DEBUG: Exception in analysis: {str(e)}")
         logging.error(f"Error analyzing segmentation for job {job_id}: {str(e)}")
         return jsonify({
             "error": f"Analysis failed: {str(e)}",
@@ -791,7 +872,14 @@ def get_visualization(job_id):
                 if quality == 'standard':
                     # Use the original lower resolution visualization for backward compatibility
                     logging.info("Using standard visualization method")
-                    image = create_colormap_visualization(segmentation, original_image, slice_idx)
+                    
+                    # Get view type for standard visualization too
+                    view_type = request.args.get('view_type', 'axial')
+                    if view_type not in ['axial', 'coronal', 'sagittal']:
+                        logging.warning(f"Invalid view_type: {view_type}, defaulting to axial")
+                        view_type = 'axial'
+                    
+                    image = create_colormap_visualization(segmentation, original_image, slice_idx, view_type)
                 else:
                     # Parse additional enhancement options from request parameters
                     try:
@@ -1377,3 +1465,359 @@ def get_three_plane_visualization(job_id):
     except Exception as e:
         logging.error(f"Error generating three-plane visualization: {str(e)}")
         return jsonify({"error": f"Visualization failed: {str(e)}"}), 500
+
+@app.route('/test', methods=['GET'])
+def test_route():
+    logging.info("TEST ROUTE CALLED - Container is using updated code!")
+    return jsonify({
+        "message": "Test route working",
+        "timestamp": "2025-07-03-latest-build"
+    })
+
+@app.route('/test-debug', methods=['GET'])
+def test_debug():
+    """Test endpoint to verify Flask routing and logging"""
+    logging.info("TEST DEBUG ENDPOINT CALLED - Flask routing working!")
+    return jsonify({
+        "message": "Test endpoint working",
+        "timestamp": "2025-07-03-debug-test",
+        "metastasis_class": METASTASIS_CLASS
+    })
+
+def calculate_segmentation_quality_metrics(segmentation, prediction_probabilities=None):
+    """
+    Calculate quality and confidence metrics for segmentation
+    
+    Args:
+        segmentation: 3D segmentation mask with class labels
+        prediction_probabilities: Optional 4D array with prediction probabilities per class
+        
+    Returns:
+        dict: Quality metrics including confidence scores
+    """
+    metrics = {
+        "overall_confidence": 0.0,
+        "class_confidence": {},
+        "segmentation_quality": {},
+        "volume_consistency": 0.0
+    }
+    
+    try:
+        # Get unique classes (excluding background)
+        classes = np.unique(segmentation)
+        classes = classes[classes > 0]
+        
+        if len(classes) == 0:
+            return metrics
+            
+        # Calculate per-class metrics
+        total_voxels = 0
+        confidence_weighted_sum = 0.0
+        
+        for class_id in classes:
+            class_mask = (segmentation == class_id)
+            class_voxel_count = np.sum(class_mask)
+            total_voxels += class_voxel_count
+            
+            if class_voxel_count == 0:
+                continue
+                
+            # Calculate confidence if probabilities are available
+            if prediction_probabilities is not None and prediction_probabilities.shape[-1] > class_id:
+                # Extract probabilities for this class
+                class_probs = prediction_probabilities[..., class_id]
+                class_confidence = np.mean(class_probs[class_mask])
+                confidence_weighted_sum += class_confidence * class_voxel_count
+            else:
+                # Default confidence based on segmentation consistency
+                class_confidence = calculate_morphological_confidence(class_mask)
+                confidence_weighted_sum += class_confidence * class_voxel_count
+            
+            metrics["class_confidence"][int(class_id)] = float(class_confidence)
+            
+            # Calculate quality metrics for this class
+            quality_metrics = calculate_class_quality_metrics(class_mask)
+            metrics["segmentation_quality"][int(class_id)] = quality_metrics
+        
+        # Overall confidence (weighted by volume)
+        if total_voxels > 0:
+            metrics["overall_confidence"] = confidence_weighted_sum / total_voxels
+            
+        # Volume consistency check
+        metrics["volume_consistency"] = calculate_volume_consistency(segmentation)
+        
+    except Exception as e:
+        logging.warning(f"Error calculating quality metrics: {str(e)}")
+    
+    return metrics
+
+def calculate_morphological_confidence(binary_mask):
+    """
+    Calculate confidence based on morphological properties of segmentation
+    
+    Args:
+        binary_mask: Binary mask for a specific class
+        
+    Returns:
+        float: Confidence score (0-1)
+    """
+    if not np.any(binary_mask):
+        return 0.0
+        
+    try:
+        # Use connected component analysis
+        labeled_mask, num_components = ndimage.label(binary_mask)
+        
+        if num_components == 0:
+            return 0.0
+            
+        # Calculate confidence based on:
+        # 1. Compactness of regions
+        # 2. Size consistency
+        # 3. Spatial distribution
+        
+        confidences = []
+        
+        for label in range(1, num_components + 1):
+            component_mask = (labeled_mask == label)
+            component_size = np.sum(component_mask)
+            
+            if component_size < 5:  # Too small, likely noise
+                confidence = 0.3
+            elif component_size > 10000:  # Very large, might be over-segmentation
+                confidence = 0.7
+            else:
+                # Calculate compactness using solidity
+                props = measure.regionprops(component_mask.astype(int))
+                if len(props) > 0:
+                    solidity = props[0].solidity if hasattr(props[0], 'solidity') else 0.8
+                    # Higher solidity (more compact) = higher confidence
+                    confidence = min(0.95, max(0.4, solidity))
+                else:
+                    confidence = 0.5
+                    
+            confidences.append(confidence)
+        
+        # Return weighted average confidence
+        sizes = [np.sum(labeled_mask == label) for label in range(1, num_components + 1)]
+        total_size = sum(sizes)
+        
+        if total_size == 0:
+            return 0.0
+            
+        weighted_confidence = sum(conf * size for conf, size in zip(confidences, sizes)) / total_size
+        return min(1.0, max(0.0, weighted_confidence))
+        
+    except Exception as e:
+        logging.warning(f"Error calculating morphological confidence: {str(e)}")
+        return 0.5  # Default moderate confidence
+
+def calculate_class_quality_metrics(binary_mask):
+    """
+    Calculate quality metrics for a specific class segmentation
+    
+    Args:
+        binary_mask: Binary mask for a specific class
+        
+    Returns:
+        dict: Quality metrics
+    """
+    metrics = {
+        "compactness": 0.0,
+        "fragmentation": 0.0,
+        "boundary_smoothness": 0.0,
+        "size_consistency": 0.0
+    }
+    
+    if not np.any(binary_mask):
+        return metrics
+        
+    try:
+        # Connected component analysis
+        labeled_mask, num_components = ndimage.label(binary_mask)
+        
+        if num_components == 0:
+            return metrics
+            
+        # Calculate compactness (ratio of area to perimeter squared)
+        total_area = np.sum(binary_mask)
+        perimeter = np.sum(ndimage.binary_dilation(binary_mask) ^ binary_mask)
+        
+        if perimeter > 0:
+            compactness = 4 * np.pi * total_area / (perimeter ** 2)
+            metrics["compactness"] = min(1.0, compactness)
+            
+        # Calculate fragmentation (number of components relative to total volume)
+        volume_per_component = total_area / num_components if num_components > 0 else 0
+        fragmentation_score = 1.0 / (1.0 + num_components / max(1, total_area / 1000))
+        metrics["fragmentation"] = fragmentation_score
+        
+        # Calculate boundary smoothness using gradient magnitude
+        gradient_x = ndimage.sobel(binary_mask.astype(float), axis=0)
+        gradient_y = ndimage.sobel(binary_mask.astype(float), axis=1)
+        gradient_z = ndimage.sobel(binary_mask.astype(float), axis=2)
+        gradient_magnitude = np.sqrt(gradient_x**2 + gradient_y**2 + gradient_z**2)
+        
+        boundary_pixels = gradient_magnitude > 0
+        if np.any(boundary_pixels):
+            smoothness = 1.0 - (np.std(gradient_magnitude[boundary_pixels]) / 
+                               (np.mean(gradient_magnitude[boundary_pixels]) + 1e-6))
+            metrics["boundary_smoothness"] = max(0.0, min(1.0, smoothness))
+            
+        # Calculate size consistency (how similar component sizes are)
+        if num_components > 1:
+            component_sizes = [np.sum(labeled_mask == i) for i in range(1, num_components + 1)]
+            size_std = np.std(component_sizes)
+            size_mean = np.mean(component_sizes)
+            consistency = 1.0 / (1.0 + size_std / (size_mean + 1e-6))
+            metrics["size_consistency"] = consistency
+        else:
+            metrics["size_consistency"] = 1.0
+            
+    except Exception as e:
+        logging.warning(f"Error calculating class quality metrics: {str(e)}")
+    
+    return metrics
+
+def calculate_volume_consistency(segmentation):
+    """
+    Calculate volume consistency score based on expected metastasis characteristics
+    
+    Args:
+        segmentation: 3D segmentation mask
+        
+    Returns:
+        float: Consistency score (0-1)
+    """
+    try:
+        # Extract metastasis regions
+        met_mask = (segmentation == METASTASIS_CLASS).astype(np.int32)
+        
+        if not np.any(met_mask):
+            return 1.0  # No metastases is consistent
+            
+        labeled_mask, num_metastases = ndimage.label(met_mask)
+        
+        if num_metastases == 0:
+            return 1.0
+            
+        # Calculate volume distribution
+        volumes = []
+        for label in range(1, num_metastases + 1):
+            volume = np.sum(labeled_mask == label) * VOXEL_VOLUME_MM3
+            volumes.append(volume)
+            
+        volumes = np.array(volumes)
+        
+        # Metastases typically range from 1mm³ to 10000mm³
+        # Check if volumes are in reasonable range
+        reasonable_volumes = (volumes >= 1.0) & (volumes <= 10000.0)
+        volume_reasonableness = np.sum(reasonable_volumes) / len(volumes) if len(volumes) > 0 else 1.0
+        
+        # Check volume distribution (not all metastases should be the same size)
+        if len(volumes) > 1:
+            volume_diversity = 1.0 - np.exp(-np.std(volumes) / (np.mean(volumes) + 1e-6))
+            volume_diversity = min(1.0, max(0.0, volume_diversity))
+        else:
+            volume_diversity = 1.0
+            
+        # Combined consistency score
+        consistency = 0.7 * volume_reasonableness + 0.3 * volume_diversity
+        
+        return min(1.0, max(0.0, consistency))
+        
+    except Exception as e:
+        logging.warning(f"Error calculating volume consistency: {str(e)}")
+        return 0.5
+
+def calculate_confidence_metrics(segmentation_probs, segmentation_mask):
+    """
+    Calculate confidence metrics for the segmentation
+    """
+    try:
+        # If we have probability maps (raw model output), calculate confidence
+        if segmentation_probs is not None:
+            logging.info(f"DEBUG: Calculating confidence metrics from probs shape: {segmentation_probs.shape}")
+            
+            # Handle different probability array formats
+            if len(segmentation_probs.shape) == 4:
+                # Check if channels are first (4, H, W, D) or last (H, W, D, 4)
+                if segmentation_probs.shape[0] == 4:
+                    # Channels first format: (4, 128, 128, 128)
+                    # Transpose to channels last: (128, 128, 128, 4)
+                    probs_channels_last = np.transpose(segmentation_probs, (1, 2, 3, 0))
+                    logging.info(f"DEBUG: Transposed probs to shape: {probs_channels_last.shape}")
+                elif segmentation_probs.shape[-1] == 4:
+                    # Already channels last format
+                    probs_channels_last = segmentation_probs
+                else:
+                    logging.warning(f"DEBUG: Unexpected probability shape: {segmentation_probs.shape}")
+                    return None
+            else:
+                logging.warning(f"DEBUG: Unexpected probability array dimensions: {segmentation_probs.shape}")
+                return None
+            
+            # For multiclass, take the max probability for each voxel
+            max_probs = np.max(probs_channels_last, axis=-1)
+            logging.info(f"DEBUG: Max probs shape: {max_probs.shape}, range: {max_probs.min():.4f}-{max_probs.max():.4f}")
+            
+            # Overall confidence metrics
+            mean_confidence = float(np.mean(max_probs))
+            min_confidence = float(np.min(max_probs))
+            max_confidence = float(np.max(max_probs))
+            
+            # Confidence for metastasis regions only
+            met_mask = (segmentation_mask == METASTASIS_CLASS)
+            metastasis_confidence = None
+            if np.any(met_mask):
+                # Get class probabilities for metastasis voxels
+                met_confidences = max_probs[met_mask]
+                
+                # Also get specific metastasis class probabilities
+                metastasis_class_probs = probs_channels_last[..., METASTASIS_CLASS]
+                met_class_confidences = metastasis_class_probs[met_mask]
+                
+                metastasis_confidence = {
+                    "mean": float(np.mean(met_confidences)),
+                    "min": float(np.min(met_confidences)),
+                    "max": float(np.max(met_confidences)),
+                    "std": float(np.std(met_confidences)),
+                    "metastasis_class_mean": float(np.mean(met_class_confidences)),
+                    "metastasis_class_min": float(np.min(met_class_confidences)),
+                    "metastasis_class_max": float(np.max(met_class_confidences)),
+                    "metastasis_class_std": float(np.std(met_class_confidences))
+                }
+                logging.info(f"DEBUG: Metastasis confidence metrics: {metastasis_confidence}")
+            
+            # Confidence distribution
+            high_conf_voxels = np.sum(max_probs > 0.8)
+            low_conf_voxels = np.sum(max_probs < 0.5)
+            total_voxels = max_probs.size
+            
+            result = {
+                "overall_confidence": {
+                    "mean": mean_confidence,
+                    "min": min_confidence,
+                    "max": max_confidence
+                },
+                "metastasis_confidence": metastasis_confidence,
+                "confidence_distribution": {
+                    "high_confidence_ratio": float(high_conf_voxels / total_voxels),
+                    "low_confidence_ratio": float(low_conf_voxels / total_voxels),
+                    "high_confidence_voxels": int(high_conf_voxels),
+                    "low_confidence_voxels": int(low_conf_voxels),
+                    "total_voxels": int(total_voxels)
+                }
+            }
+            
+            logging.info(f"DEBUG: Final confidence metrics: {result}")
+            return result
+        else:
+            # No probability information available
+            logging.info("DEBUG: No probability information available")
+            return None
+    except Exception as e:
+        logging.error(f"Error calculating confidence metrics: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None

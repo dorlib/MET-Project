@@ -20,7 +20,12 @@ logger = logging.getLogger(__name__)
 
 # Create Flask app
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS with explicit settings
+CORS(app, origins=['http://localhost:3000', 'http://127.0.0.1:3000'], 
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization'],
+     supports_credentials=True)
 
 # Configure Flask app
 app.config['DEBUG'] = True
@@ -262,11 +267,17 @@ def direct_get_user():
             user_id = payload.get('user_id')
             from services.services import UserService
             from utils.database import get_db
-            db = next(get_db())
             
-            user_data = UserService.get_user_by_id(db, user_id)
-            if user_data:
-                return jsonify(user_data)
+            # Use database session as context manager
+            db_gen = get_db()
+            db = next(db_gen)
+            try:
+                user_data = UserService.get_user_by_id(db, user_id)
+                if user_data:
+                    return jsonify(user_data)
+            finally:
+                # Properly close the database session
+                db.close()
     
     # Return error for unauthenticated requests
     return jsonify({"error": "Authentication required"}), 401
@@ -289,16 +300,22 @@ def direct_get_user_settings():
             user_id = payload.get('user_id')
             from services.services import UserService
             from utils.database import get_db
-            db = next(get_db())
             
-            user_data = UserService.get_user_by_id(db, user_id)
-            if user_data:
-                # Return user settings - for now just 2FA status
-                return jsonify({
-                    "two_fa_enabled": user_data.get('two_fa_enabled', False),
-                    "email_notifications": user_data.get('email_notifications', True),
-                    "scan_history_limit": user_data.get('scan_history_limit', 100)
-                })
+            # Use database session as context manager
+            db_gen = get_db()
+            db = next(db_gen)
+            try:
+                user_data = UserService.get_user_by_id(db, user_id)
+                if user_data:
+                    # Return user settings - for now just 2FA status
+                    return jsonify({
+                        "two_fa_enabled": user_data.get('two_fa_enabled', False),
+                        "email_notifications": user_data.get('email_notifications', True),
+                        "scan_history_limit": user_data.get('scan_history_limit', 100)
+                    })
+            finally:
+                # Properly close the database session
+                db.close()
     
     # Return error for unauthenticated requests
     return jsonify({"error": "Authentication required"}), 401
