@@ -980,3 +980,44 @@ def get_three_plane_visualization(job_id):
     except Exception as e:
         logging.error(f"Error generating three-plane visualization for job {job_id}: {str(e)}")
         return jsonify({"error": f"Visualization failed: {str(e)}"}), 500
+
+@app.route('/download/prediction/<job_id>', methods=['GET'])
+def download_prediction_file(job_id):
+    """
+    Endpoint to download the prediction .npy file for a completed job
+    """
+    # Validate job_id format to prevent path traversal
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+    
+    try:
+        # Check if the job is completed
+        model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}")
+        
+        if model_status_response.status_code != 200:
+            return jsonify({"error": "Job not found"}), 404
+            
+        model_status = model_status_response.json()
+        if model_status.get("status") != "completed":
+            return jsonify({"error": "Job not completed yet"}), 400
+        
+        # Try to get the prediction file from the results folder
+        prediction_file_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+        
+        if not os.path.exists(prediction_file_path):
+            return jsonify({"error": "Prediction file not found"}), 404
+        
+        # Log the download request
+        logging.info(f"Downloading prediction file for job {job_id}")
+        
+        # Return the file as a download
+        return send_file(
+            prediction_file_path,
+            as_attachment=True,
+            download_name=f"{job_id}_prediction.npy",
+            mimetype='application/octet-stream'
+        )
+        
+    except Exception as e:
+        logging.error(f"Error downloading prediction file for job {job_id}: {str(e)}")
+        return jsonify({"error": f"Download failed: {str(e)}"}), 500
