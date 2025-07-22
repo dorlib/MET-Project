@@ -1991,3 +1991,97 @@ def get_volume_dimensions(job_id):
     except Exception as e:
         logging.error(f"Error getting volume dimensions: {str(e)}")
         return jsonify({"error": f"Failed to get volume dimensions: {str(e)}"}), 500
+
+@app.route('/download/prediction/<job_id>', methods=['GET'])
+def download_prediction_file(job_id):
+    """
+    Download the raw prediction/segmentation file (.npy format)
+    
+    Returns the original segmentation/prediction numpy array as a downloadable file
+    """
+    try:
+        # Validate job_id
+        if not job_id or '/' in job_id or '..' in job_id:
+            return jsonify({"error": "Invalid job ID"}), 400
+        
+        # Look for the prediction/segmentation file
+        prediction_path = None
+        
+        # Try different possible file patterns
+        patterns = [
+            f"*{job_id}*prediction*.npy",
+            f"*{job_id}*segmentation*.npy", 
+            f"*{job_id}*.npy"
+        ]
+        
+        for pattern in patterns:
+            matching_files = glob.glob(os.path.join(RESULTS_FOLDER, pattern))
+            if matching_files:
+                # Prefer files with "prediction" or "segmentation" in the name
+                for file_path in matching_files:
+                    filename = os.path.basename(file_path).lower()
+                    if 'prediction' in filename or 'segmentation' in filename:
+                        prediction_path = file_path
+                        break
+                
+                # If no specific prediction file found, use the first match
+                if not prediction_path:
+                    prediction_path = matching_files[0]
+                break
+        
+        if not prediction_path or not os.path.exists(prediction_path):
+            return jsonify({"error": "Prediction file not found"}), 404
+        
+        # Validate that it's actually a .npy file
+        if not prediction_path.lower().endswith('.npy'):
+            return jsonify({"error": "Invalid file format - not a .npy file"}), 400
+        
+        # Get file info
+        file_size = os.path.getsize(prediction_path)
+        filename = os.path.basename(prediction_path)
+        
+        # Try to load and validate the numpy array
+        try:
+            prediction_array = np.load(prediction_path)
+            array_shape = prediction_array.shape
+            array_dtype = str(prediction_array.dtype)
+            
+            logging.info(f"Serving prediction file: {filename}, shape: {array_shape}, dtype: {array_dtype}, size: {file_size} bytes")
+            
+        except Exception as e:
+            logging.error(f"Error validating numpy file: {e}")
+            return jsonify({"error": "Invalid or corrupted numpy file"}), 500
+        
+        # Create a safe filename for download
+        safe_filename = f"{job_id}_prediction.npy"
+        
+        def generate():
+            """Generator to stream the file in chunks"""
+            with open(prediction_path, 'rb') as f:
+                while True:
+                    chunk = f.read(8192)  # 8KB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+        
+        # Create response with appropriate headers
+        response = Response(
+            generate(),
+            content_type='application/octet-stream',
+            headers={
+                'Content-Disposition': f'attachment; filename="{safe_filename}"',
+                'Content-Length': str(file_size),
+                'X-Array-Shape': str(array_shape),
+                'X-Array-Dtype': array_dtype
+            }
+        )
+        
+        logging.info(f"Prediction file download initiated for job {job_id}: {safe_filename}")
+        return response
+        
+    except Exception as e:
+        logging.error(f"Error downloading prediction file: {str(e)}")
+        return jsonify({"error": f"Failed to download prediction file: {str(e)}"}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5002, debug=True)

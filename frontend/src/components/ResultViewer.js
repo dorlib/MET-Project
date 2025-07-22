@@ -26,7 +26,7 @@ import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend } from 'chart.js';
 import VisualizationControls from './VisualizationControls';
 import Interactive3DViewer from './Interactive3DViewer';
-import { PictureAsPdf, TableChart } from '@mui/icons-material';
+import { PictureAsPdf, TableChart, CloudDownload } from '@mui/icons-material';
 import api from '../services/api';
 
 // Register Chart.js components
@@ -408,6 +408,31 @@ const ResultViewer = ({ jobId, status, results }) => {
     }
   };
 
+  // Handle downloading raw prediction file
+  const handleDownloadPrediction = async () => {
+    try {
+      setExporting(true);
+      
+      const response = await api.downloadPrediction(jobId);
+      
+      // Create a download link for the blob
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `prediction_mask_${jobId}.npy`);
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading prediction file:', error);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // For pending status
   if (status !== 'completed') {
     // Handle error states specially
@@ -562,6 +587,16 @@ const ResultViewer = ({ jobId, status, results }) => {
                   startIcon={<TableChart />}
                 >
                   {exporting ? 'Exporting as CSV...' : 'Export Results as CSV'}
+                </Button>
+                
+                <Button 
+                  variant="contained" 
+                  color="success" 
+                  onClick={handleDownloadPrediction}
+                  disabled={exporting}
+                  startIcon={<CloudDownload />}
+                >
+                  {exporting ? 'Downloading...' : 'Download Prediction Mask (.npy)'}
                 </Button>
                 
                 <Button 

@@ -241,6 +241,13 @@ const apiService = {
       responseType: 'blob'
     });
   },
+
+  // Download raw prediction/mask file (.npy format)
+  downloadPrediction: (jobId) => {
+    return api.get(`/download/prediction/${jobId}`, {
+      responseType: 'blob'
+    });
+  },
   
   filterScans: (filters = {}) => {
     return api.get('/user/scans/filter', { params: filters });

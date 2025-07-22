@@ -276,11 +276,85 @@ def get_results(job_id):
         "job_id": job_id,
         "status": "completed",
         "segmentation_path": f"/visualization/{job_id}",
+        "prediction_download_url": f"/download/prediction/{job_id}",
         "metastasis_count": analysis_data.get("metastasis_count"),
         "metastasis_volumes": analysis_data.get("metastasis_volumes"),
         "total_volume": analysis_data.get("total_volume"),
         "confidence_metrics": analysis_data.get("confidence_metrics"),
     })
+
+@app.route('/download/prediction/<job_id>', methods=['GET'])
+def download_prediction(job_id):
+    """
+    Endpoint to download the raw prediction/mask file (.npy format)
+    """
+    # Validate job_id format to prevent path traversal
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+    
+    try:
+        # First, try to get the file directly from the image processing service
+        # This approach is more robust as it doesn't depend on model service state
+        download_response = requests.get(
+            f"{IMAGE_PROCESSING_SERVICE_URL}/download/prediction/{job_id}",
+            stream=True  # Stream the file to avoid loading it all into memory
+        )
+        
+        if download_response.status_code == 200:
+            # File exists and can be downloaded
+            
+            # Create a streaming response to forward the file
+            def generate():
+                for chunk in download_response.iter_content(chunk_size=8192):
+                    if chunk:
+                        yield chunk
+            
+            logging.info(f"Prediction file download initiated for job {job_id}")
+            
+            # Get content type and filename from the downstream response
+            content_type = download_response.headers.get('Content-Type', 'application/octet-stream')
+            content_disposition = download_response.headers.get('Content-Disposition', f'attachment; filename="{job_id}_prediction.npy"')
+            
+            return Response(
+                generate(),
+                content_type=content_type,
+                headers={
+                    'Content-Disposition': content_disposition,
+                    'Content-Length': download_response.headers.get('Content-Length', '')
+                }
+            )
+        elif download_response.status_code == 404:
+            # File doesn't exist - check if we should give more specific error info
+            
+            # Optional: Check model service status for more detailed error message
+            try:
+                model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}", timeout=5)
+                
+                if model_status_response.status_code == 200:
+                    model_status = model_status_response.json()
+                    if model_status.get("status") != "completed":
+                        return jsonify({
+                            "error": "Prediction not ready",
+                            "status": model_status.get("status", "unknown"),
+                            "message": "Model prediction still processing"
+                        }), 202
+                
+                return jsonify({"error": "Prediction file not found"}), 404
+                        
+            except requests.exceptions.RequestException:
+                # Model service is not available, but that's okay for download
+                return jsonify({"error": "Prediction file not found"}), 404
+        else:
+            # Other error from image processing service
+            logging.error(f"Image processing service returned error {download_response.status_code}: {download_response.text}")
+            return jsonify({
+                "error": "Failed to retrieve prediction file",
+                "status_code": download_response.status_code
+            }), download_response.status_code
+        
+    except Exception as e:
+        logging.error(f"Error downloading prediction file: {str(e)}")
+        return jsonify({"error": f"Download failed: {str(e)}"}), 500
 
 @app.route('/advanced-analysis/<job_id>', methods=['GET'])
 def get_advanced_analysis(job_id):
