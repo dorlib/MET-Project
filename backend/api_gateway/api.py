@@ -19,13 +19,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from preprocessing import preprocess_nifti_t1ce_for_model
 
 app = Flask(__name__)
-
-# Configure CORS with explicit settings
-CORS(app, origins=['http://localhost:3000', 'http://127.0.0.1:3000'], 
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-     allow_headers=['Content-Type', 'Authorization'],
-     supports_credentials=True)
-
+CORS(app)
 logging.basicConfig(level=logging.INFO)
 
 MODEL_SERVICE_URL = os.environ.get('MODEL_SERVICE_URL', 'http://model-service:5001')
@@ -73,6 +67,48 @@ def token_required(f):
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "healthy", "service": "api-gateway"})
+
+@app.route('/models', methods=['GET'])
+def list_available_models():
+    """
+    Endpoint to list all available trained models
+    """
+    try:
+        # Forward request to model service
+        response = requests.get(f"{MODEL_SERVICE_URL}/models")
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return jsonify({
+                "error": "Failed to retrieve model list",
+                "details": response.text
+            }), response.status_code
+            
+    except Exception as e:
+        logging.error(f"Error listing models: {str(e)}")
+        return jsonify({"error": f"Failed to list models: {str(e)}"}), 500
+
+@app.route('/models/<model_name>', methods=['GET'])
+def get_model_info(model_name):
+    """
+    Endpoint to get information about a specific model
+    """
+    try:
+        # Forward request to model service
+        response = requests.get(f"{MODEL_SERVICE_URL}/models/{model_name}")
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return jsonify({
+                "error": "Failed to retrieve model information",
+                "details": response.text
+            }), response.status_code
+            
+    except Exception as e:
+        logging.error(f"Error getting model info: {str(e)}")
+        return jsonify({"error": f"Failed to get model info: {str(e)}"}), 500
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -169,11 +205,23 @@ def upload_file():
         if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
             return jsonify({"error": "File processing failed or empty file received"}), 400
         
+        # Get model parameter from query string
+        model_name = request.args.get('model')
+        
         # Forward to model service for prediction
         try:
+            prediction_data = {
+                "file_path": file_path, 
+                "job_id": job_id
+            }
+            
+            # Add model parameter if specified
+            if model_name:
+                prediction_data["model_name"] = model_name
+                
             response = requests.post(
                 f"{MODEL_SERVICE_URL}/predict",
-                json={"file_path": file_path, "job_id": job_id},
+                json=prediction_data,
                 timeout=10  # Short timeout since we just need to submit the job, not wait for completion
             )
         except requests.RequestException as e:
@@ -226,33 +274,29 @@ def get_results(job_id):
     # Check if the model prediction is complete
     model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}")
     
-    # If model service knows about the job, check its status
-    if model_status_response.status_code == 200:
-        model_status = model_status_response.json()
-        
-        if model_status.get("status") != "completed":
-            return jsonify({
-                "job_id": job_id,
-                "status": model_status.get("status", "unknown"),
-                "message": "Segmentation still processing"
-            })
+    if model_status_response.status_code != 200:
+        return jsonify({"error": "Invalid job ID or processing error"}), 404
     
-    # If model service doesn't know about the job or job is completed, 
-    # check if results exist in image processing service
+    model_status = model_status_response.json()
+    
+    if model_status.get("status") != "completed":
+        return jsonify({
+            "job_id": job_id,
+            "status": model_status.get("status", "unknown"),
+            "message": "Segmentation still processing"
+        })
+    
+    # Get metastasis analysis from image processing service
     analysis_response = requests.get(
         f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}"
     )
     
     if analysis_response.status_code != 200:
-        # Neither service knows about this job or has results
-        if model_status_response.status_code != 200:
-            return jsonify({"error": "Invalid job ID or results not found"}), 404
-        else:
-            return jsonify({
-                "job_id": job_id,
-                "status": "segmentation_complete", 
-                "message": "Segmentation complete, analysis pending or failed"
-            }), 202
+        return jsonify({
+            "job_id": job_id,
+            "status": "segmentation_complete",
+            "message": "Segmentation complete, analysis pending or failed"
+        }), 202
     
     # Get analysis data
     analysis_data = analysis_response.json()
@@ -276,85 +320,11 @@ def get_results(job_id):
         "job_id": job_id,
         "status": "completed",
         "segmentation_path": f"/visualization/{job_id}",
-        "prediction_download_url": f"/download/prediction/{job_id}",
         "metastasis_count": analysis_data.get("metastasis_count"),
         "metastasis_volumes": analysis_data.get("metastasis_volumes"),
         "total_volume": analysis_data.get("total_volume"),
         "confidence_metrics": analysis_data.get("confidence_metrics"),
     })
-
-@app.route('/download/prediction/<job_id>', methods=['GET'])
-def download_prediction(job_id):
-    """
-    Endpoint to download the raw prediction/mask file (.npy format)
-    """
-    # Validate job_id format to prevent path traversal
-    if '/' in job_id or '\\' in job_id or '..' in job_id:
-        return jsonify({"error": "Invalid job ID format"}), 400
-    
-    try:
-        # First, try to get the file directly from the image processing service
-        # This approach is more robust as it doesn't depend on model service state
-        download_response = requests.get(
-            f"{IMAGE_PROCESSING_SERVICE_URL}/download/prediction/{job_id}",
-            stream=True  # Stream the file to avoid loading it all into memory
-        )
-        
-        if download_response.status_code == 200:
-            # File exists and can be downloaded
-            
-            # Create a streaming response to forward the file
-            def generate():
-                for chunk in download_response.iter_content(chunk_size=8192):
-                    if chunk:
-                        yield chunk
-            
-            logging.info(f"Prediction file download initiated for job {job_id}")
-            
-            # Get content type and filename from the downstream response
-            content_type = download_response.headers.get('Content-Type', 'application/octet-stream')
-            content_disposition = download_response.headers.get('Content-Disposition', f'attachment; filename="{job_id}_prediction.npy"')
-            
-            return Response(
-                generate(),
-                content_type=content_type,
-                headers={
-                    'Content-Disposition': content_disposition,
-                    'Content-Length': download_response.headers.get('Content-Length', '')
-                }
-            )
-        elif download_response.status_code == 404:
-            # File doesn't exist - check if we should give more specific error info
-            
-            # Optional: Check model service status for more detailed error message
-            try:
-                model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}", timeout=5)
-                
-                if model_status_response.status_code == 200:
-                    model_status = model_status_response.json()
-                    if model_status.get("status") != "completed":
-                        return jsonify({
-                            "error": "Prediction not ready",
-                            "status": model_status.get("status", "unknown"),
-                            "message": "Model prediction still processing"
-                        }), 202
-                
-                return jsonify({"error": "Prediction file not found"}), 404
-                        
-            except requests.exceptions.RequestException:
-                # Model service is not available, but that's okay for download
-                return jsonify({"error": "Prediction file not found"}), 404
-        else:
-            # Other error from image processing service
-            logging.error(f"Image processing service returned error {download_response.status_code}: {download_response.text}")
-            return jsonify({
-                "error": "Failed to retrieve prediction file",
-                "status_code": download_response.status_code
-            }), download_response.status_code
-        
-    except Exception as e:
-        logging.error(f"Error downloading prediction file: {str(e)}")
-        return jsonify({"error": f"Download failed: {str(e)}"}), 500
 
 @app.route('/advanced-analysis/<job_id>', methods=['GET'])
 def get_advanced_analysis(job_id):
@@ -484,106 +454,6 @@ def get_advanced_visualization(job_id):
     except Exception as e:
         logging.error(f"Error requesting visualization from image processing service: {str(e)}")
         return jsonify({"error": f"Visualization request failed: {str(e)}"}), 500
-
-@app.route('/segmentation-data/<job_id>', methods=['GET'])
-def get_segmentation_data(job_id):
-    """
-    Endpoint to get raw segmentation data for 3D visualization
-    
-    Query parameters:
-    - downsample: Downsampling factor (1-4, default: 2)
-    - max_voxels: Maximum number of voxels to return (default: 50000)
-    """
-    # Validate job_id format
-    if '/' in job_id or '\\' in job_id or '..' in job_id:
-        return jsonify({"error": "Invalid job ID format"}), 400
-    
-    # Check if the job exists and is completed (similar logic to results endpoint)
-    model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}")
-    
-    # If model service knows about the job, check its status
-    if model_status_response.status_code == 200:
-        model_status = model_status_response.json()
-        if model_status.get("status") != "completed":
-            return jsonify({
-                "error": "Segmentation not ready",
-                "status": model_status.get("status", "unknown")
-            }), 202
-    
-    # Check if segmentation results exist in image processing service
-    # (even if model service doesn't know about the job)
-    
-    try:
-        # Forward the request to the image processing service
-        response = requests.get(
-            f"{IMAGE_PROCESSING_SERVICE_URL}/segmentation-data/{job_id}",
-            params=request.args
-        )
-        
-        if response.status_code != 200:
-            logging.error(f"Image processing service returned error {response.status_code}: {response.text}")
-            
-            # If neither service knows about this job, return proper error
-            if model_status_response.status_code != 200 and response.status_code == 404:
-                return jsonify({"error": "Invalid job ID or results not found"}), 404
-                
-            return jsonify({
-                "error": "Failed to get segmentation data",
-                "status_code": response.status_code
-            }), response.status_code
-        
-        logging.info(f"Segmentation data successfully retrieved for job {job_id}")
-        return response.json()
-        
-    except Exception as e:
-        logging.error(f"Error requesting segmentation data: {str(e)}")
-        return jsonify({"error": f"Request failed: {str(e)}"}), 500
-
-@app.route('/api/volume-dimensions/<job_id>', methods=['GET'])
-def get_volume_dimensions(job_id):
-    """
-    Endpoint to get volume dimensions for slice navigation
-    
-    Returns dimensions [width, height, depth] and optional spacing information
-    """
-    # Validate job_id format
-    if '/' in job_id or '\\' in job_id or '..' in job_id:
-        return jsonify({"error": "Invalid job ID format"}), 400
-    
-    # Check if the job exists and is completed (similar logic to other endpoints)
-    model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}")
-    
-    # If model service knows about the job, check its status
-    if model_status_response.status_code == 200:
-        model_status = model_status_response.json()
-        if model_status.get("status") != "completed":
-            return jsonify({
-                "error": "Volume data not ready",
-                "status": model_status.get("status", "unknown")
-            }), 202
-    
-    try:
-        # Forward the request to the image processing service
-        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/volume-dimensions/{job_id}")
-        
-        if response.status_code != 200:
-            logging.error(f"Image processing service returned error {response.status_code}: {response.text}")
-            
-            # If neither service knows about this job, return proper error
-            if model_status_response.status_code != 200 and response.status_code == 404:
-                return jsonify({"error": "Invalid job ID or results not found"}), 404
-                
-            return jsonify({
-                "error": "Failed to get volume dimensions",
-                "status_code": response.status_code
-            }), response.status_code
-        
-        logging.info(f"Volume dimensions successfully retrieved for job {job_id}")
-        return response.json()
-        
-    except Exception as e:
-        logging.error(f"Error requesting volume dimensions: {str(e)}")
-        return jsonify({"error": f"Request failed: {str(e)}"}), 500
 
 @app.route('/lesion-analysis/<job_id>', methods=['GET'])
 def get_lesion_analysis(job_id):
@@ -774,44 +644,6 @@ def get_user_scans():
         logging.error(f"Error fetching user scans: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/user/scans/<job_id>', methods=['DELETE'])
-@token_required
-def delete_user_scan(job_id):
-    """
-    Delete a specific scan for the authenticated user
-    """
-    try:
-        # Forward to user service with token
-        auth_header = request.headers.get('Authorization')
-        
-        response = requests.delete(
-            f"{USER_SERVICE_URL}/scans/{job_id}",
-            headers={"Authorization": auth_header}
-        )
-        return response.json(), response.status_code
-    except Exception as e:
-        logging.error(f"Error deleting scan: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/user/settings', methods=['GET'])
-@token_required
-def get_user_settings():
-    """
-    Get authenticated user's settings including 2FA status
-    """
-    try:
-        # Forward to user service with token
-        auth_header = request.headers.get('Authorization')
-        
-        response = requests.get(
-            f"{USER_SERVICE_URL}/user/settings",
-            headers={"Authorization": auth_header}
-        )
-        return response.json(), response.status_code
-    except Exception as e:
-        logging.error(f"Error fetching user settings: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
 # 2FA endpoints have been removed
 
 @app.route('/export/csv/<job_id>', methods=['GET'])
@@ -821,8 +653,8 @@ def export_csv(job_id):
     Export scan results as CSV
     """
     try:
-        # First, get result data from the analyze endpoint
-        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}")
+        # First, get result data
+        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/results/{job_id}")
         
         if response.status_code != 200:
             return jsonify({"error": "Result not found or not processed yet"}), 404
@@ -869,8 +701,8 @@ def export_pdf(job_id):
     Export scan results as PDF
     """
     try:
-        # First, get result data from the analyze endpoint
-        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}")
+        # First, get result data
+        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/results/{job_id}")
         
         if response.status_code != 200:
             return jsonify({"error": "Result not found or not processed yet"}), 404
@@ -948,391 +780,203 @@ def export_pdf(job_id):
         logging.error(f"Error exporting PDF: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/share/<job_id>', methods=['POST'])
+@app.route('/user/scans/filter', methods=['GET'])
 @token_required
-def create_share_link(job_id):
+def filter_scans():
     """
-    Create a shareable link for scan results
+    Get filtered scan history with advanced filtering
     
-    Request body:
-    - expires_in: Expiration time in hours (default: 24, max: 168 for 7 days)
-    - allow_download: Whether to allow PDF/CSV downloads (default: false)
-    - include_detailed_analysis: Whether to include detailed analysis (default: false)
+    Query parameters:
+    - min_metastasis: Minimum number of metastases
+    - max_metastasis: Maximum number of metastases
+    - min_volume: Minimum total volume (mm³)
+    - max_volume: Maximum total volume (mm³)
+    - start_date: Filter from this date (YYYY-MM-DD)
+    - end_date: Filter until this date (YYYY-MM-DD)
+    - page: Page number (default: 1)
+    - per_page: Items per page (default: 10)
     """
     try:
-        # Validate that the user owns this scan or has access to it
+        # Forward to user service with token and filters
         auth_header = request.headers.get('Authorization')
         
-        # Check if scan exists and user has access
+        # Forward all query parameters
         response = requests.get(
-            f"{USER_SERVICE_URL}/scans",
+            f"{USER_SERVICE_URL}/scans/filter",
             headers={"Authorization": auth_header},
-            params={"job_id": job_id}
+            params=request.args
         )
         
-        if response.status_code != 200:
-            return jsonify({"error": "Scan not found or access denied"}), 404
-            
-        scan_data = response.json()
-        user_scans = scan_data.get('scans', [])
-        
-        # Check if job_id exists in user's scans
-        if not any(scan.get('job_id') == job_id for scan in user_scans):
-            return jsonify({"error": "Scan not found or access denied"}), 404
-        
-        # Get request parameters
-        data = request.get_json() or {}
-        expires_in = min(int(data.get('expires_in', 24)), 168)  # Max 7 days
-        allow_download = bool(data.get('allow_download', False))
-        include_detailed = bool(data.get('include_detailed_analysis', False))
-        
-        # Generate unique share token
-        import secrets
-        import time
-        
-        share_token = secrets.token_urlsafe(32)
-        expires_at = int(time.time()) + (expires_in * 3600)  # Convert hours to seconds
-        
-        # Store share information (you could use a database, Redis, or file storage)
-        # For now, I'll use a simple approach with user service
-        share_data = {
-            "share_token": share_token,
-            "job_id": job_id,
-            "created_by": request.user.get('user_id'),
-            "expires_at": expires_at,
-            "allow_download": allow_download,
-            "include_detailed_analysis": include_detailed,
-            "created_at": int(time.time())
-        }
-        
-        # Store the share link in user service
+        return response.json(), response.status_code
+    except Exception as e:
+        logging.error(f"Error filtering scans: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/volume-dimensions/<job_id>', methods=['GET'])
+def get_volume_dimensions(job_id):
+    """
+    Get the dimensions of the volume for a specific job
+    """
+    # Validate job_id format to prevent path traversal
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+    
+    try:
+        # First, try to get dimensions from the image processing service if available
         try:
-            store_response = requests.post(
-                f"{USER_SERVICE_URL}/shares",
-                json=share_data,
-                headers={"Authorization": auth_header}
-            )
-            
-            if store_response.status_code != 200:
-                logging.warning(f"Failed to store share data: {store_response.text}")
+            response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/volume-info/{job_id}")
+            if response.status_code == 200:
+                return response.json(), 200
         except Exception as e:
-            logging.warning(f"Could not store share data: {str(e)}")
+            logging.warning(f"Could not get volume info from image processing service: {str(e)}")
         
-        # Create shareable URL
-        base_url = request.host_url.rstrip('/')
-        share_url = f"{base_url}/shared/{share_token}"
+        # If the specific endpoint is not available, try to load the prediction file locally
+        pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
         
+        if not os.path.exists(pred_path):
+            return jsonify({"error": "Segmentation not found"}), 404
+            
+        try:
+            # Load the prediction file to get dimensions
+            data = np.load(pred_path)
+            dimensions = data.shape
+            return jsonify({
+                "job_id": job_id,
+                "dimensions": dimensions,
+                "max_slice_index": dimensions[0] - 1 if len(dimensions) > 0 else 0
+            }), 200
+        except Exception as file_error:
+            logging.warning(f"Error loading prediction file: {str(file_error)}")
+            
+        # If we reach here, provide a reasonable default
         return jsonify({
-            "share_url": share_url,
-            "share_token": share_token,
-            "expires_at": expires_at,
-            "expires_in_hours": expires_in,
-            "allow_download": allow_download,
-            "include_detailed_analysis": include_detailed,
-            "message": f"Shareable link created. Expires in {expires_in} hours."
-        }), 200
-        
-    except Exception as e:
-        logging.error(f"Error creating share link: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/shared/<share_token>', methods=['GET'])
-def get_shared_results(share_token):
-    """
-    Get shared scan results without authentication
-    """
-    try:
-        # Retrieve share information
-        # For now, try to get it from user service
-        try:
-            share_response = requests.get(f"{USER_SERVICE_URL}/shares/{share_token}")
-            
-            if share_response.status_code != 200:
-                return jsonify({"error": "Share link not found or expired"}), 404
-                
-            share_data = share_response.json()
-        except Exception as e:
-            return jsonify({"error": "Invalid share link"}), 404
-        
-        # Check if share link has expired
-        import time
-        current_time = int(time.time())
-        
-        if current_time > share_data.get('expires_at', 0):
-            return jsonify({"error": "Share link has expired"}), 410
-        
-        job_id = share_data.get('job_id')
-        if not job_id:
-            return jsonify({"error": "Invalid share data"}), 400
-        
-        # Get the analysis results
-        analysis_response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}")
-        
-        if analysis_response.status_code != 200:
-            return jsonify({"error": "Results not available"}), 404
-            
-        analysis_data = analysis_response.json()
-        
-        # Build response based on share permissions
-        shared_results = {
             "job_id": job_id,
-            "shared_at": share_data.get('created_at'),
-            "expires_at": share_data.get('expires_at'),
-            "metastasis_count": analysis_data.get("metastasis_count"),
-            "total_volume": analysis_data.get("total_volume"),
-            "metastasis_volumes": analysis_data.get("metastasis_volumes"),
-            "segmentation_path": f"/shared/{share_token}/visualization",
-            "permissions": {
-                "allow_download": share_data.get('allow_download', False),
-                "include_detailed_analysis": share_data.get('include_detailed_analysis', False)
-            }
-        }
-        
-        # Add detailed analysis if permitted
-        if share_data.get('include_detailed_analysis', False):
-            shared_results["confidence_metrics"] = analysis_data.get("confidence_metrics")
-            shared_results["detailed_analysis_available"] = True
-        
-        return jsonify(shared_results), 200
-        
+            "dimensions": [128, 128, 128],  # Typical MRI dimensions
+            "max_slice_index": 127
+        }), 200
     except Exception as e:
-        logging.error(f"Error retrieving shared results: {str(e)}")
+        logging.error(f"Error getting volume dimensions: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/shared/<share_token>/visualization', methods=['GET'])
-def get_shared_visualization(share_token):
+@app.route('/status/<job_id>', methods=['GET'])
+def get_status(job_id):
     """
-    Get visualization for shared results
+    Endpoint to check the status of a processing job
     """
     try:
-        # Verify share token and get job_id
-        try:
-            share_response = requests.get(f"{USER_SERVICE_URL}/shares/{share_token}")
-            
-            if share_response.status_code != 200:
-                return jsonify({"error": "Share link not found or expired"}), 404
-                
-            share_data = share_response.json()
-        except Exception as e:
-            return jsonify({"error": "Invalid share link"}), 404
+        # Forward request to model service
+        model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}")
         
-        # Check expiration
-        import time
-        if int(time.time()) > share_data.get('expires_at', 0):
-            return jsonify({"error": "Share link has expired"}), 410
+        if model_status_response.status_code != 200:
+            logging.warning(f"Model service returned status {model_status_response.status_code} for job {job_id}")
+            return jsonify({"status": "not_found", "error": "Job not found"}), 404
         
-        job_id = share_data.get('job_id')
-        if not job_id:
-            return jsonify({"error": "Invalid share data"}), 400
+        # Return the status from model service
+        return jsonify(model_status_response.json())
+    except Exception as e:
+        logging.error(f"Error checking status for job {job_id}: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/model/health', methods=['GET'])
+def model_health_check():
+    """
+    Endpoint to check the health of the model service
+    """
+    try:
+        response = requests.get(f"{MODEL_SERVICE_URL}/health")
+        return jsonify(response.json()), response.status_code
+    except Exception as e:
+        logging.error(f"Error checking model service health: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 503
+
+@app.route('/side-by-side-visualization/<job_id>', methods=['GET'])
+def get_side_by_side_visualization(job_id):
+    """
+    Endpoint to get side-by-side visualization of original image and segmentation mask
+    
+    Args:
+        job_id: Job ID for the scan
         
-        # Forward visualization request to image processing service
+    Query parameters:
+    - slice_idx: Optional slice index for the visualization
+    - view_type: View type (axial, coronal, sagittal)
+    - upscale_factor: Optional upscale factor for visualization
+    - contrast_enhancement: Whether to apply contrast enhancement (true/false)
+    - edge_enhancement: Whether to apply edge enhancement (true/false)
+    """
+    try:
+        # Log the visualization request parameters
+        logging.info(f"Side-by-side visualization request for job {job_id} with params: {request.args}")
+        
+        # Forward the request to the image processing service with all query parameters
         viz_response = requests.get(
-            f"{IMAGE_PROCESSING_SERVICE_URL}/visualization/{job_id}",
-            params=request.args
+            f"{IMAGE_PROCESSING_SERVICE_URL}/side-by-side/{job_id}",
+            params=request.args,
+            stream=True
         )
         
         if viz_response.status_code != 200:
-            return jsonify({"error": "Visualization not available"}), 404
+            logging.error(f"Image processing service returned error: {viz_response.status_code}")
+            error_data = viz_response.json() if viz_response.headers.get('Content-Type') == 'application/json' else {"error": "Visualization generation failed"}
+            return jsonify(error_data), viz_response.status_code
         
-        # Return the visualization
+        logging.info(f"Side-by-side visualization successfully generated for job {job_id}")
+        
+        # Stream the visualization image back to the client
         return Response(
-            viz_response.content,
-            mimetype=viz_response.headers['Content-Type'],
+            viz_response.iter_content(chunk_size=1024),
+            status=viz_response.status_code,
             headers={
-                'Content-Disposition': viz_response.headers.get('Content-Disposition', f'inline; filename="shared_{job_id}_visualization.png"')
+                'Content-Type': viz_response.headers.get('Content-Type', 'image/png'),
+                'Content-Disposition': viz_response.headers.get('Content-Disposition', f'inline; filename="{job_id}_side_by_side.png"')
             }
         )
-        
     except Exception as e:
-        logging.error(f"Error retrieving shared visualization: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Error generating side-by-side visualization for job {job_id}: {str(e)}")
+        return jsonify({"error": f"Visualization failed: {str(e)}"}), 500
 
-@app.route('/shared/<share_token>/download/<format>', methods=['GET'])
-def download_shared_results(share_token, format):
+@app.route('/three-plane-visualization/<job_id>', methods=['GET'])
+def get_three_plane_visualization(job_id):
     """
-    Download shared results in PDF or CSV format
+    Endpoint to get visualization with all three anatomical planes side by side
     
     Args:
-        share_token: The share token
-        format: 'pdf' or 'csv'
+        job_id: Job ID for the scan
+        
+    Query parameters:
+    - axial_slice_idx: Optional axial slice index
+    - coronal_slice_idx: Optional coronal slice index
+    - sagittal_slice_idx: Optional sagittal slice index
+    - contrast_enhancement: Whether to apply contrast enhancement (true/false)
+    - edge_enhancement: Whether to apply edge enhancement (true/false)
     """
     try:
-        # Verify share token and permissions
-        try:
-            share_response = requests.get(f"{USER_SERVICE_URL}/shares/{share_token}")
-            
-            if share_response.status_code != 200:
-                return jsonify({"error": "Share link not found or expired"}), 404
-                
-            share_data = share_response.json()
-        except Exception as e:
-            return jsonify({"error": "Invalid share link"}), 404
+        # Log the visualization request parameters
+        logging.info(f"Three-plane visualization request for job {job_id} with params: {request.args}")
         
-        # Check expiration
-        import time
-        if int(time.time()) > share_data.get('expires_at', 0):
-            return jsonify({"error": "Share link has expired"}), 410
-        
-        # Check download permission
-        if not share_data.get('allow_download', False):
-            return jsonify({"error": "Downloads not allowed for this share"}), 403
-        
-        job_id = share_data.get('job_id')
-        if not job_id:
-            return jsonify({"error": "Invalid share data"}), 400
-        
-        if format not in ['pdf', 'csv']:
-            return jsonify({"error": "Invalid format. Use 'pdf' or 'csv'"}), 400
-        
-        # Get the analysis data
-        analysis_response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}")
-        
-        if analysis_response.status_code != 200:
-            return jsonify({"error": "Results not available"}), 404
-            
-        result_data = analysis_response.json()
-        
-        if format == 'csv':
-            # Generate CSV
-            import csv
-            import io
-            
-            output = io.StringIO()
-            writer = csv.writer(output)
-            
-            writer.writerow(['Brain Metastasis Analysis Results (Shared)'])
-            writer.writerow(['Job ID', job_id])
-            writer.writerow(['Total Metastasis Count', result_data.get('metastasis_count', 0)])
-            writer.writerow(['Total Volume (mm³)', result_data.get('total_volume', 0)])
-            writer.writerow([])  # Empty row
-            
-            writer.writerow(['Metastasis #', 'Volume (mm³)', '% of Total'])
-            total_volume = result_data.get('total_volume', 0)
-            
-            for i, volume in enumerate(result_data.get('metastasis_volumes', [])):
-                percentage = (volume / total_volume * 100) if total_volume > 0 else 0
-                writer.writerow([i + 1, round(volume, 2), f"{round(percentage, 1)}%"])
-            
-            output.seek(0)
-            
-            return output.getvalue(), 200, {
-                'Content-Type': 'text/csv',
-                'Content-Disposition': f'attachment; filename=shared_metastasis_results_{job_id}.csv'
-            }
-            
-        elif format == 'pdf':
-            # Generate PDF
-            from reportlab.lib.pagesizes import letter
-            from reportlab.lib import colors
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-            from reportlab.lib.styles import getSampleStyleSheet
-            import io
-            
-            buffer = io.BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=letter)
-            styles = getSampleStyleSheet()
-            
-            elements = []
-            
-            # Title
-            title = Paragraph("Brain Metastasis Analysis Results (Shared)", styles['Title'])
-            elements.append(title)
-            elements.append(Spacer(1, 12))
-            
-            # Summary data
-            summary_data = [
-                ["Job ID:", job_id],
-                ["Total Metastasis Count:", str(result_data.get('metastasis_count', 0))],
-                ["Total Volume (mm³):", str(round(result_data.get('total_volume', 0), 2))]
-            ]
-            
-            summary_table = Table(summary_data, colWidths=[120, 300])
-            summary_table.setStyle(TableStyle([
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-                ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-            ]))
-            
-            elements.append(summary_table)
-            elements.append(Spacer(1, 24))
-            
-            # Metastasis data
-            metastasis_title = Paragraph("Individual Metastasis Analysis", styles['Heading2'])
-            elements.append(metastasis_title)
-            elements.append(Spacer(1, 12))
-            
-            metastasis_data = [["Metastasis #", "Volume (mm³)", "% of Total"]]
-            total_volume = result_data.get('total_volume', 0)
-            
-            for i, volume in enumerate(result_data.get('metastasis_volumes', [])):
-                percentage = (volume / total_volume * 100) if total_volume > 0 else 0
-                metastasis_data.append([i + 1, round(volume, 2), f"{round(percentage, 1)}%"])
-            
-            metastasis_table = Table(metastasis_data, colWidths=[100, 100, 100])
-            metastasis_table.setStyle(TableStyle([
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('ALIGN', (1, 1), (2, -1), 'RIGHT'),
-            ]))
-            
-            elements.append(metastasis_table)
-            
-            # Add shared notice
-            elements.append(Spacer(1, 24))
-            shared_notice = Paragraph("Note: This report was generated from a shared link.", styles['Normal'])
-            elements.append(shared_notice)
-            
-            # Build PDF
-            doc.build(elements)
-            buffer.seek(0)
-            
-            return buffer.getvalue(), 200, {
-                'Content-Type': 'application/pdf',
-                'Content-Disposition': f'attachment; filename=shared_metastasis_results_{job_id}.pdf'
-            }
-            
-    except Exception as e:
-        logging.error(f"Error downloading shared results: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/shares', methods=['GET'])
-@token_required
-def list_user_shares():
-    """
-    List all share links created by the authenticated user
-    """
-    try:
-        auth_header = request.headers.get('Authorization')
-        
-        response = requests.get(
-            f"{USER_SERVICE_URL}/shares",
-            headers={"Authorization": auth_header},
-            params=request.args
+        # Forward the request to the image processing service with all query parameters
+        viz_response = requests.get(
+            f"{IMAGE_PROCESSING_SERVICE_URL}/three-plane/{job_id}",
+            params=request.args,
+            stream=True
         )
         
-        return response.json(), response.status_code
+        if viz_response.status_code != 200:
+            logging.error(f"Image processing service returned error: {viz_response.status_code}")
+            error_data = viz_response.json() if viz_response.headers.get('Content-Type') == 'application/json' else {"error": "Visualization generation failed"}
+            return jsonify(error_data), viz_response.status_code
         
-    except Exception as e:
-        logging.error(f"Error listing shares: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/shares/<share_token>', methods=['DELETE'])
-@token_required
-def revoke_share(share_token):
-    """
-    Revoke/delete a share link
-    """
-    try:
-        auth_header = request.headers.get('Authorization')
+        logging.info(f"Three-plane visualization successfully generated for job {job_id}")
         
-        response = requests.delete(
-            f"{USER_SERVICE_URL}/shares/{share_token}",
-            headers={"Authorization": auth_header}
+        # Stream the visualization image back to the client
+        return Response(
+            viz_response.iter_content(chunk_size=1024),
+            status=viz_response.status_code,
+            headers={
+                'Content-Type': viz_response.headers.get('Content-Type', 'image/png'),
+                'Content-Disposition': viz_response.headers.get('Content-Disposition', f'inline; filename="{job_id}_three_plane.png"')
+            }
         )
-        
-        return response.json(), response.status_code
-        
     except Exception as e:
-        logging.error(f"Error revoking share: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Error generating three-plane visualization for job {job_id}: {str(e)}")
+        return jsonify({"error": f"Visualization failed: {str(e)}"}), 500

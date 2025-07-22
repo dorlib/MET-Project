@@ -55,10 +55,12 @@ class JobStatus(BaseModel):
 class PredictionRequest(BaseModel):
     file_path: str
     job_id: str
+    model_name: Optional[str] = None
 
 # On start, load model once
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL = None
+CURRENT_MODEL_NAME = None  # Track currently loaded model
 
 # Set torch to use multiple threads for CPU inference
 torch.set_num_threads(4)
@@ -99,7 +101,7 @@ def start_background_worker():
 
 @app.on_event("startup")
 async def startup_event():
-    global MODEL
+    global MODEL, CURRENT_MODEL_NAME
     logger.info(f"Starting MET Segmentation Service on {DEVICE}")
     
     # Make sure required directories exist
@@ -123,6 +125,7 @@ async def startup_event():
             return
             
         MODEL = get_model(checkpoint_path=model_path, device=DEVICE)
+        CURRENT_MODEL_NAME = "brats_t1ce.pth"  # Set current model name
         logger.info("Model loaded successfully on startup")
     except Exception as e:
         logger.error(f"Failed to load model on startup: {str(e)}")
@@ -451,3 +454,64 @@ async def list_jobs():
         "completed": len([j for j in job_registry.values() if j.status == "completed"]),
         "failed": len([j for j in job_registry.values() if j.status == "failed"])
     })
+
+@app.get("/models")
+async def list_models():
+    """
+    Endpoint to list all available models
+    """
+    try:
+        models = []
+        current_model = CURRENT_MODEL_NAME
+        
+        # List all .pth files in the models directory
+        for filename in os.listdir(MODELS_DIR):
+            if filename.endswith('.pth'):
+                file_path = os.path.join(MODELS_DIR, filename)
+                file_stat = os.stat(file_path)
+                
+                models.append({
+                    "name": filename,
+                    "size": file_stat.st_size,
+                    "size_mb": round(file_stat.st_size / (1024 * 1024), 1),
+                    "modified": file_stat.st_mtime,
+                    "is_loaded": filename == current_model
+                })
+        
+        return JSONResponse({
+            "models": models,
+            "count": len(models),
+            "current_model": current_model
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listing models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
+
+@app.get("/models/{model_name}")
+async def get_model_info(model_name: str):
+    """
+    Endpoint to get information about a specific model
+    """
+    try:
+        model_path = os.path.join(MODELS_DIR, model_name)
+        
+        if not os.path.exists(model_path):
+            raise HTTPException(status_code=404, detail="Model not found")
+            
+        file_stat = os.stat(model_path)
+        
+        return JSONResponse({
+            "name": model_name,
+            "size": file_stat.st_size,
+            "size_mb": round(file_stat.st_size / (1024 * 1024), 1),
+            "modified": file_stat.st_mtime,
+            "is_loaded": model_name == CURRENT_MODEL_NAME,
+            "path": model_path
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting model info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get model info: {str(e)}")

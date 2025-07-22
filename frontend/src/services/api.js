@@ -42,7 +42,7 @@ const apiService = {
   },
   
   // Scan upload and analysis with retry functionality
-  uploadScan: async (formData, onProgress) => {
+  uploadScan: async (formData, onProgress, modelName = null) => {
     // Configuration
     const maxRetries = 3;
     const retryDelay = 2000; // 2 seconds
@@ -50,7 +50,10 @@ const apiService = {
     
     const makeRequest = async () => {
       try {
-        return await api.post('/upload', formData, {
+        // Add model parameter to the URL if specified
+        const uploadUrl = modelName ? `/upload?model=${encodeURIComponent(modelName)}` : '/upload';
+        
+        return await api.post(uploadUrl, formData, {
           // Don't set Content-Type header - let the browser set it automatically for FormData
           // This ensures multipart/form-data is used with proper boundaries
           timeout: 60000, // 60 seconds timeout
@@ -80,6 +83,11 @@ const apiService = {
     };
     
     return makeRequest();
+  },
+  
+  // Get available models
+  getModels: () => {
+    return api.get('/models');
   },
   
   getJobStatus: (jobId) => {

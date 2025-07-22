@@ -14,7 +14,11 @@ import {
   CardContent,
   Fade,
   Chip,
-  Avatar
+  Avatar,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import BrainIcon from '@mui/icons-material/Psychology';
@@ -31,6 +35,31 @@ const UploadForm = ({ onUploadSuccess }) => {
   const [file, setFile] = React.useState(null);
   const [uploadProgress, setUploadProgress] = React.useState(0);
   const [processingMessage, setProcessingMessage] = React.useState('');
+  const [models, setModels] = React.useState([]);
+  const [selectedModel, setSelectedModel] = React.useState('');
+  const [loadingModels, setLoadingModels] = React.useState(false);
+
+  // Load available models on component mount
+  React.useEffect(() => {
+    const loadModels = async () => {
+      setLoadingModels(true);
+      try {
+        const response = await api.getModels();
+        setModels(response.data.models || []);
+        // Set default model if available
+        if (response.data.models && response.data.models.length > 0) {
+          setSelectedModel(response.data.current_model || response.data.models[0].name);
+        }
+      } catch (error) {
+        console.error('Error loading models:', error);
+        setError('Failed to load available models');
+      } finally {
+        setLoadingModels(false);
+      }
+    };
+    
+    loadModels();
+  }, []);
 
   const onDrop = useCallback(acceptedFiles => {
     // Accept .npy, .nii, and .nii.gz files
@@ -142,7 +171,7 @@ const UploadForm = ({ onUploadSuccess }) => {
 
       const response = await api.uploadScan(formData, (progress) => {
         setUploadProgress(progress);
-      });
+      }, selectedModel);
       
       clearInterval(progressInterval);
       setUploadProgress(100);
@@ -366,6 +395,73 @@ const UploadForm = ({ onUploadSuccess }) => {
               {error}
             </Alert>
           )}
+
+          {/* Model Selection */}
+          <Box sx={{ mb: 4 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 2, color: 'primary.main' }}>
+              Select AI Model
+            </Typography>
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel id="model-select-label">Choose Model</InputLabel>
+              <Select
+                labelId="model-select-label"
+                value={selectedModel}
+                label="Choose Model"
+                onChange={(e) => setSelectedModel(e.target.value)}
+                disabled={loadingModels || uploading}
+                sx={{
+                  borderRadius: 2,
+                  '& .MuiOutlinedInput-root': {
+                    '&:hover fieldset': {
+                      borderColor: 'primary.main',
+                    },
+                  },
+                }}
+              >
+                {loadingModels ? (
+                  <MenuItem disabled>
+                    <CircularProgress size={20} sx={{ mr: 1 }} />
+                    Loading models...
+                  </MenuItem>
+                ) : models.length === 0 ? (
+                  <MenuItem disabled>No models available</MenuItem>
+                ) : (
+                  models.map((model) => (
+                    <MenuItem key={model.name} value={model.name}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                        <Box>
+                          <Typography variant="body1">{model.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Size: {model.size_mb?.toFixed(1)} MB
+                            {model.is_loaded && ' • Currently Loaded'}
+                          </Typography>
+                        </Box>
+                        {model.is_loaded && (
+                          <Chip
+                            label="Active"
+                            size="small"
+                            color="success"
+                            sx={{ ml: 1 }}
+                          />
+                        )}
+                      </Box>
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+            
+            {selectedModel && (
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                <Typography variant="body2">
+                  Selected model: <strong>{selectedModel}</strong>
+                  {models.find(m => m.name === selectedModel)?.is_loaded 
+                    ? ' (Ready for immediate processing)' 
+                    : ' (Will be loaded automatically)'}
+                </Typography>
+              </Alert>
+            )}
+          </Box>
 
           <Box
             {...getRootProps()}
