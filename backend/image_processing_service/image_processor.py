@@ -3,6 +3,7 @@
 
 import os
 import numpy as np
+import glob
 from flask import Flask, jsonify, request, send_file, Response
 import logging
 from scipy import ndimage
@@ -1821,3 +1822,172 @@ def calculate_confidence_metrics(segmentation_probs, segmentation_mask):
         import traceback
         traceback.print_exc()
         return None
+
+@app.route('/segmentation-data/<job_id>', methods=['GET'])
+def get_segmentation_data(job_id):
+    """
+    Get the raw segmentation data for 3D visualization
+    Returns downsampled segmentation data to avoid large transfers
+    """
+    if not job_id:
+        return jsonify({"error": "Missing job ID"}), 400
+        
+    # Validate job_id format
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+    
+    # Find the prediction file
+    pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+    
+    if not os.path.exists(pred_path):
+        return jsonify({"error": "Segmentation not found"}), 404
+    
+    try:
+        # Load the segmentation mask
+        segmentation = np.load(pred_path)
+        logging.info(f"Loading segmentation data for 3D visualization. Shape: {segmentation.shape}")
+        
+        # Get downsampling factor from query params
+        downsample_factor = int(request.args.get('downsample', '2'))
+        downsample_factor = max(1, min(downsample_factor, 4))  # Limit between 1 and 4
+        
+        # Downsample if requested to reduce data size
+        if downsample_factor > 1:
+            scale_factor = 1.0 / downsample_factor
+            segmentation_downsampled = zoom(segmentation, (scale_factor, scale_factor, scale_factor), order=0)
+            logging.info(f"Downsampled segmentation from {segmentation.shape} to {segmentation_downsampled.shape}")
+        else:
+            segmentation_downsampled = segmentation
+        
+        # Find all non-zero voxels and their class labels
+        nonzero_indices = np.nonzero(segmentation_downsampled)
+        if len(nonzero_indices[0]) == 0:
+            return jsonify({
+                "job_id": job_id,
+                "voxels": [],
+                "shape": segmentation_downsampled.shape,
+                "classes": [],
+                "colors": {}
+            })
+        
+        # Get the class labels for non-zero voxels
+        voxel_classes = segmentation_downsampled[nonzero_indices].astype(int)
+        
+        # Create voxel data with positions and classes
+        voxels = []
+        for i in range(len(nonzero_indices[0])):
+            voxels.append({
+                "x": int(nonzero_indices[2][i]),  # Note: swapping to match web coordinate system
+                "y": int(nonzero_indices[1][i]),
+                "z": int(nonzero_indices[0][i]),
+                "class": int(voxel_classes[i])
+            })
+        
+        # Limit number of voxels to prevent huge transfers
+        max_voxels = int(request.args.get('max_voxels', '50000'))
+        if len(voxels) > max_voxels:
+            # Sample randomly to keep representative data
+            import random
+            voxels = random.sample(voxels, max_voxels)
+            logging.info(f"Sampled {max_voxels} voxels from {len(nonzero_indices[0])} total")
+        
+        # Get unique classes and create color mapping
+        unique_classes = list(set(voxel_classes))
+        colors = {}
+        for cls in unique_classes:
+            if cls in TISSUE_COLORS:
+                # Convert RGB to hex
+                rgb = TISSUE_COLORS[cls]
+                hex_color = "#{:02x}{:02x}{:02x}".format(
+                    int(rgb[0] * 255),
+                    int(rgb[1] * 255), 
+                    int(rgb[2] * 255)
+                )
+                colors[str(cls)] = hex_color
+            else:
+                # Default color for unknown classes
+                colors[str(cls)] = "#ffffff"
+        
+        result = {
+            "job_id": job_id,
+            "voxels": voxels,
+            "metadata": {
+                "shape": [int(dim) for dim in segmentation_downsampled.shape],
+                "original_shape": [int(dim) for dim in segmentation.shape],
+                "downsample_factor": downsample_factor,
+                "voxel_count": len(voxels),
+                "total_voxels": len(nonzero_indices[0])
+            },
+            "classes": {
+                str(cls): {
+                    "name": f"Class {cls}",
+                    "color": colors[str(cls)],
+                    "voxel_count": int(np.sum(np.array([v["class"] for v in voxels]) == cls))
+                }
+                for cls in unique_classes
+            },
+            "total_voxels": len(voxels)
+        }
+        
+        logging.info(f"Returning segmentation data: {len(voxels)} voxels, {len(unique_classes)} classes")
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error getting segmentation data: {str(e)}")
+        return jsonify({"error": f"Failed to get segmentation data: {str(e)}"}), 500
+
+@app.route('/volume-dimensions/<job_id>', methods=['GET'])
+def get_volume_dimensions(job_id):
+    """
+    Get the dimensions of the volume for slice navigation
+    
+    Returns:
+    - dimensions: [width, height, depth] array for slice navigation
+    - spacing: voxel spacing information if available
+    """
+    try:
+        # Validate job_id
+        if not job_id or '/' in job_id or '..' in job_id:
+            return jsonify({"error": "Invalid job ID"}), 400
+        
+        # Look for the segmentation file
+        segmentation_path = None
+        for pattern in [f"*{job_id}*segmentation*.npy", f"*{job_id}*prediction*.npy"]:
+            matching_files = glob.glob(os.path.join(RESULTS_FOLDER, pattern))
+            if matching_files:
+                segmentation_path = matching_files[0]
+                break
+        
+        if not segmentation_path or not os.path.exists(segmentation_path):
+            return jsonify({"error": "Segmentation data not found"}), 404
+        
+        # Load the segmentation to get dimensions
+        segmentation = np.load(segmentation_path)
+        dimensions = list(segmentation.shape)
+        
+        # Try to get spacing information from original NIfTI if available
+        spacing = None
+        try:
+            # Look for original NIfTI file
+            for pattern in [f"*{job_id}*.nii.gz", f"*{job_id}*.nii"]:
+                matching_files = glob.glob(os.path.join(RESULTS_FOLDER, pattern))
+                if matching_files:
+                    nifti_img = nib.load(matching_files[0])
+                    spacing = nifti_img.header.get_zooms()[:3]  # x, y, z spacing
+                    break
+        except Exception as e:
+            logging.warning(f"Could not get spacing information: {e}")
+        
+        result = {
+            "job_id": job_id,
+            "dimensions": dimensions,
+            "spacing": list(spacing) if spacing else None,
+            "total_voxels": int(np.prod(dimensions))
+        }
+        
+        logging.info(f"Volume dimensions for {job_id}: {dimensions}")
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error getting volume dimensions: {str(e)}")
+        return jsonify({"error": f"Failed to get volume dimensions: {str(e)}"}), 500

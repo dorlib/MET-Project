@@ -270,3 +270,119 @@ class ScanService:
             
         except Exception as e:
             return {"success": False, "error": str(e), "status_code": 500}
+    
+class ShareService:
+    @staticmethod
+    def create_share(db: Session, share_data: Dict) -> Dict:
+        """
+        Create a new share link
+        """
+        try:
+            from repositories.repositories import ShareRepository
+            
+            share = ShareRepository.create_share(
+                db=db,
+                share_token=share_data['share_token'],
+                job_id=share_data['job_id'],
+                created_by=share_data['created_by'],
+                expires_at=share_data['expires_at'],
+                allow_download=share_data.get('allow_download', False),
+                include_detailed_analysis=share_data.get('include_detailed_analysis', False),
+                created_at=share_data['created_at']
+            )
+            
+            return {
+                "success": True,
+                "data": share.to_dict(),
+                "status_code": 201
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e), "status_code": 500}
+    
+    @staticmethod
+    def get_share_by_token(db: Session, share_token: str) -> Dict:
+        """
+        Get share information by token
+        """
+        try:
+            from repositories.repositories import ShareRepository
+            import time
+            
+            share = ShareRepository.get_share_by_token(db, share_token)
+            if not share:
+                return {"success": False, "error": "Share not found", "status_code": 404}
+            
+            # Check if share is revoked
+            if share.is_revoked:
+                return {"success": False, "error": "Share link has been revoked", "status_code": 410}
+            
+            # Check if share has expired
+            current_time = int(time.time())
+            if current_time > share.expires_at:
+                return {"success": False, "error": "Share link has expired", "status_code": 410}
+            
+            return {
+                "success": True,
+                "data": share.to_dict(),
+                "status_code": 200
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e), "status_code": 500}
+    
+    @staticmethod
+    def get_user_shares(db: Session, user_id: int) -> Dict:
+        """
+        Get all shares created by a user
+        """
+        try:
+            from repositories.repositories import ShareRepository
+            import time
+            
+            shares = ShareRepository.get_shares_by_user(db, user_id)
+            current_time = int(time.time())
+            
+            share_list = []
+            for share in shares:
+                share_data = share.to_dict()
+                share_data['is_expired'] = current_time > share.expires_at
+                share_data['time_left'] = max(0, share.expires_at - current_time)
+                share_list.append(share_data)
+            
+            return {
+                "success": True,
+                "data": {"shares": share_list},
+                "status_code": 200
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e), "status_code": 500}
+    
+    @staticmethod
+    def revoke_share(db: Session, share_token: str, user_id: int) -> Dict:
+        """
+        Revoke a share link (mark as revoked)
+        """
+        try:
+            from repositories.repositories import ShareRepository
+            
+            share = ShareRepository.get_share_by_token(db, share_token)
+            if not share:
+                return {"success": False, "error": "Share not found", "status_code": 404}
+            
+            # Check if user owns this share
+            if share.created_by != user_id:
+                return {"success": False, "error": "Unauthorized to revoke this share", "status_code": 403}
+            
+            # Mark as revoked
+            success = ShareRepository.revoke_share(db, share_token)
+            
+            if success:
+                return {
+                    "success": True,
+                    "data": {"message": "Share link revoked successfully"},
+                    "status_code": 200
+                }
+            else:
+                return {"success": False, "error": "Failed to revoke share", "status_code": 500}
+                
+        except Exception as e:
+            return {"success": False, "error": str(e), "status_code": 500}

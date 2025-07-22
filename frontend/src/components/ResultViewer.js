@@ -17,12 +17,15 @@ import {
   Tabs,
   Tab,
   Button,
-  Stack
+  Stack,
+  FormControlLabel,
+  Switch,
+  Slider
 } from '@mui/material';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend } from 'chart.js';
-import Visualization3DPlaceholder from './Visualization3DPlaceholder';
 import VisualizationControls from './VisualizationControls';
+import Interactive3DViewer from './Interactive3DViewer';
 import { PictureAsPdf, TableChart } from '@mui/icons-material';
 import api from '../services/api';
 
@@ -111,13 +114,13 @@ const ResultViewer = ({ jobId, status, results }) => {
   useEffect(() => {
     // Only log debugging info when we have completed status
     if (status === 'completed' && jobId && results) {
-      console.log("Debug - Component rendering with:", {
-        jobId,
-        status,
-        sliceIndex: ensureValidSlice(sliceIndex),
-        sliceInitialized,
-        hasSegmentationPath: !!results?.segmentation_path
-      });
+      // console.log("Debug - Component rendering with:", {
+      //   jobId,
+      //   status,
+      //   sliceIndex: ensureValidSlice(sliceIndex),
+      //   sliceInitialized,
+      //   hasSegmentationPath: !!results?.segmentation_path
+      // });
       
       // Only log URL when we have results
       if (getVisualizationUrl() !== '#') {
@@ -133,8 +136,8 @@ const ResultViewer = ({ jobId, status, results }) => {
     try {
       console.log('Testing getResults API call...');
       const response = await api.getResults(jobId);
-      console.log('Raw results response:', response);
-      console.log('Results data:', response.data);
+      // console.log('Raw results response:', response);
+      // console.log('Results data:', response.data);
       console.log('segmentation_path present:', !!response.data?.segmentation_path);
       
       if (response.data?.segmentation_path) {
@@ -225,7 +228,7 @@ const ResultViewer = ({ jobId, status, results }) => {
   // Monitor when results change
   useEffect(() => {
     if (results) {
-      console.log("Results updated:", results);
+      // console.log("Results updated:", results);
       console.log("Results contains segmentation_path:", results.segmentation_path ? "Yes" : "No");
     }
   }, [results]);
@@ -286,7 +289,7 @@ const ResultViewer = ({ jobId, status, results }) => {
         
         if (response.status === 200) {
           const data = response.data;
-          console.log("Volume dimensions data:", data);
+          // console.log("Volume dimensions data:", data);
           
           if (data.dimensions && data.dimensions.length > 0) {
             // Store all volume dimensions for different view orientations
@@ -446,10 +449,10 @@ const ResultViewer = ({ jobId, status, results }) => {
   
   // Prepare chart data
   const chartData = {
-    labels: metastasis_volumes.map((_, index) => `Metastasis ${index + 1}`),
+    labels: (metastasis_volumes || []).map((_, index) => `Metastasis ${index + 1}`),
     datasets: [
       {
-        data: metastasis_volumes,
+        data: metastasis_volumes || [],
         backgroundColor: [
           '#FF6384',
           '#36A2EB',
@@ -479,13 +482,13 @@ const ResultViewer = ({ jobId, status, results }) => {
   };
 
   // Add debugging for segmentation_path and visualization params
-  console.log("Debug - Results object:", results);
-  console.log("Debug - Segmentation path exists:", results?.segmentation_path ? "Yes" : "No");
-  console.log("Debug - Current visualization settings:", { 
-    vizType, vizQuality, sliceIndex, 
-    upscaleFactor, enhanceContrast, enhanceEdges, 
-    maxSliceIndex
-  });
+  // console.log("Debug - Results object:", results);
+  // console.log("Debug - Segmentation path exists:", results?.segmentation_path ? "Yes" : "No");
+  // console.log("Debug - Current visualization settings:", { 
+  //   vizType, vizQuality, sliceIndex, 
+  //   upscaleFactor, enhanceContrast, enhanceEdges, 
+  //   maxSliceIndex
+  // });
   
   return (
     <Box sx={{ p: 3 }}>
@@ -593,7 +596,15 @@ const ResultViewer = ({ jobId, status, results }) => {
       </Tabs>
       
       {tabValue === 0 && (
-        <Visualization3DPlaceholder jobId={jobId} />
+        <Interactive3DViewer 
+          jobId={jobId}
+          status={status}
+          results={results}
+          enhanceContrast={enhanceContrast}
+          setEnhanceContrast={setEnhanceContrast}
+          enhanceEdges={enhanceEdges}
+          setEnhanceEdges={setEnhanceEdges}
+        />
       )}
       
       {tabValue === 1 && (

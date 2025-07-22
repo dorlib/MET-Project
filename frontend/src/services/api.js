@@ -328,6 +328,21 @@ const apiService = {
     return api.get(`/${endpoint}/${jobId}`, { params, responseType: 'blob' });
   },
   
+  // Get segmentation data for 3D visualization
+  getSegmentationData: (jobId, options = {}) => {
+    const {
+      downsample = 2,
+      max_voxels = 50000
+    } = options;
+    
+    const params = {
+      downsample,
+      max_voxels
+    };
+    
+    return api.get(`/segmentation-data/${jobId}`, { params });
+  },
+  
   // 2FA
   setup2FA: () => {
     return api.post('/auth/2fa/setup');
