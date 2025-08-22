@@ -64,6 +64,12 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
         setLoading(true);
         const response = await api.getResults(jobId, true);
         if (response && response.data) {
+          // Check if the status indicates job not found
+          if (response.data.status === 'not_found' || response.data.error) {
+            setError('Scan not found. This scan may have been deleted, expired, or the ID may be incorrect.');
+            return;
+          }
+          
           setScanInfo(response.data);
           setScanStatus(response.data.status);
         } else {
@@ -71,7 +77,23 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
         }
       } catch (err) {
         console.error('Error fetching scan info:', err);
-        setError('Failed to load scan details. Please try again later.');
+        
+        // Handle specific error cases
+        if (err.response) {
+          if (err.response.status === 404) {
+            setError('Scan not found. This scan may have been deleted, expired, or the ID may be incorrect.');
+          } else if (err.response.status === 401) {
+            setError('Authentication required. Please log in to view this scan.');
+          } else if (err.response.status >= 500) {
+            setError('Server error occurred. Please try again later.');
+          } else {
+            setError(`Failed to load scan details (Error ${err.response.status}). Please try again later.`);
+          }
+        } else if (err.code === 'ERR_NETWORK') {
+          setError('Network error. Please check your connection and try again.');
+        } else {
+          setError('Failed to load scan details. Please try again later.');
+        }
       } finally {
         setLoading(false);
       }
@@ -120,15 +142,40 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
         <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
+          <Typography variant="h6" component="div" sx={{ mb: 1 }}>
+            Unable to Load Scan Details
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            {error}
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            <strong>Scan ID:</strong> {jobId}
+          </Typography>
+          <Typography variant="body2">
+            You can try:
+          </Typography>
+          <ul style={{ margin: '8px 0 16px 20px', fontSize: '0.875rem' }}>
+            <li>Going back to your profile to find the correct scan</li>
+            <li>Uploading a new scan from the main page</li>
+            <li>Checking if you have the correct URL</li>
+          </ul>
         </Alert>
-        <Button
-          variant="outlined"
-          startIcon={<ArrowBack />}
-          onClick={onNavigateBack}
-        >
-          Back to Profile
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            startIcon={<ArrowBack />}
+            onClick={onNavigateBack}
+          >
+            Back to Profile
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => window.location.href = '/'}
+          >
+            Upload New Scan
+          </Button>
+        </Box>
       </Container>
     );
   }

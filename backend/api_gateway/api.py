@@ -762,6 +762,30 @@ def get_user_scans():
         logging.error(f"Error fetching user scans: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/user/scans/<scan_id>', methods=['DELETE'])
+@token_required
+def delete_scan(scan_id):
+    """
+    Delete a specific scan by ID
+    """
+    try:
+        # Forward to user service with token
+        auth_header = request.headers.get('Authorization')
+        
+        response = requests.delete(
+            f"{USER_SERVICE_URL}/scans/{scan_id}",
+            headers={"Authorization": auth_header}
+        )
+        
+        if response.status_code == 200:
+            return jsonify({"message": "Scan deleted successfully"}), 200
+        else:
+            return response.json(), response.status_code
+            
+    except Exception as e:
+        logging.error(f"Error deleting scan {scan_id}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 # 2FA endpoints have been removed
 
 @app.route('/export/csv/<job_id>', methods=['GET'])
@@ -771,13 +795,32 @@ def export_csv(job_id):
     Export scan results as CSV
     """
     try:
-        # First, get result data
-        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/results/{job_id}")
+        # Get result data using the same logic as the main results endpoint
+        # First, check if the model prediction is complete
+        model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}")
         
-        if response.status_code != 200:
-            return jsonify({"error": "Result not found or not processed yet"}), 404
-            
-        result_data = response.json()
+        if model_status_response.status_code != 200:
+            return jsonify({"error": "Job not found"}), 404
+        
+        model_status = model_status_response.json()
+        
+        if model_status.get("status") != "completed":
+            return jsonify({
+                "error": "Scan processing not complete yet. Please wait for processing to finish."
+            }), 400
+        
+        # Get metastasis analysis from image processing service
+        analysis_response = requests.get(
+            f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}"
+        )
+        
+        if analysis_response.status_code != 200:
+            return jsonify({
+                "error": "Analysis not available. Please ensure the scan has been fully processed."
+            }), 404
+        
+        # Get analysis data
+        result_data = analysis_response.json()
         
         # Create CSV content
         import csv
@@ -819,13 +862,32 @@ def export_pdf(job_id):
     Export scan results as PDF
     """
     try:
-        # First, get result data
-        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/results/{job_id}")
+        # Get result data using the same logic as the main results endpoint
+        # First, check if the model prediction is complete
+        model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}")
         
-        if response.status_code != 200:
-            return jsonify({"error": "Result not found or not processed yet"}), 404
-            
-        result_data = response.json()
+        if model_status_response.status_code != 200:
+            return jsonify({"error": "Job not found"}), 404
+        
+        model_status = model_status_response.json()
+        
+        if model_status.get("status") != "completed":
+            return jsonify({
+                "error": "Scan processing not complete yet. Please wait for processing to finish."
+            }), 400
+        
+        # Get metastasis analysis from image processing service
+        analysis_response = requests.get(
+            f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}"
+        )
+        
+        if analysis_response.status_code != 200:
+            return jsonify({
+                "error": "Analysis not available. Please ensure the scan has been fully processed."
+            }), 404
+        
+        # Get analysis data
+        result_data = analysis_response.json()
         
         # Create PDF content using ReportLab
         from reportlab.lib.pagesizes import letter
