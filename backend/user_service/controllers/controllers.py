@@ -243,33 +243,28 @@ def get_scans():
         if not payload:
             return jsonify({"error": "Invalid authentication token"}), 401
         
-        # Use database session as context manager
-        db_gen = get_db()
-        db = next(db_gen)
+        # Get user by ID from the token
+        db = next(get_db())
+        user_id = payload.get('user_id')
+        user_data = UserService.get_user_by_id(db, user_id)
+        
+        if not user_data:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Get pagination parameters
         try:
-            user_id = payload.get('user_id')
-            user_data = UserService.get_user_by_id(db, user_id)
-            
-            if not user_data:
-                return jsonify({"error": "User not found"}), 404
-            
-            # Get pagination parameters
-            try:
-                page = int(request.args.get('page', 1))
-                per_page = int(request.args.get('per_page', 10))
-            except ValueError:
-                return jsonify({"error": "Invalid pagination parameters"}), 400
-            
-            # Get scans for the user
-            result = ScanService.get_user_scans(db, user_id, page, per_page)
-            
-            if result["success"]:
-                return jsonify(result["data"]), result["status_code"]
-            else:
-                return jsonify({"error": result["error"]}), result["status_code"]
-        finally:
-            # Properly close the database session
-            db.close()
+            page = int(request.args.get('page', 1))
+            per_page = int(request.args.get('per_page', 10))
+        except ValueError:
+            return jsonify({"error": "Invalid pagination parameters"}), 400
+        
+        # Get scans for the user
+        result = ScanService.get_user_scans(db, user_id, page, per_page)
+        
+        if result["success"]:
+            return jsonify(result["data"]), result["status_code"]
+        else:
+            return jsonify({"error": result["error"]}), result["status_code"]
     except Exception as e:
         logger.error(f"Error in get_scans: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
@@ -354,26 +349,21 @@ def delete_scan(job_id):
         if not payload:
             return jsonify({"error": "Invalid authentication token"}), 401
         
-        # Use database session as context manager
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            user_id = payload.get('user_id')
-            user_data = UserService.get_user_by_id(db, user_id)
-            
-            if not user_data:
-                return jsonify({"error": "User not found"}), 404
-            
-            # Delete the scan
-            result = ScanService.delete_scan(db, job_id, user_id)
-            
-            if result["success"]:
-                return jsonify({"message": "Scan deleted successfully"}), result["status_code"]
-            else:
-                return jsonify({"error": result["error"]}), result["status_code"]
-        finally:
-            # Properly close the database session
-            db.close()
+        # Get user by ID from the token
+        db = next(get_db())
+        user_id = payload.get('user_id')
+        user_data = UserService.get_user_by_id(db, user_id)
+        
+        if not user_data:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Delete the scan
+        result = ScanService.delete_scan(db, job_id, user_id)
+        
+        if result["success"]:
+            return jsonify({"message": "Scan deleted successfully"}), result["status_code"]
+        else:
+            return jsonify({"error": result["error"]}), result["status_code"]
     except Exception as e:
         logger.error(f"Error in delete_scan: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500

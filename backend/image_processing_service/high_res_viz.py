@@ -12,7 +12,7 @@ from scipy.ndimage import zoom
 from viz_utils import enhance_segmentation_mask, enhance_original_image, create_colorized_overlay
 
 def create_high_res_visualization(segmentation, original_image=None, slice_idx=None, tissue_colors=None, tissue_names=None, 
-                                 upscale_factor=1.0, contrast_enhancement=True, edge_enhancement=True, view_type='axial'):
+                                 upscale_factor=1.0, contrast_enhancement=True, edge_enhancement=True):
     """
     Create a high-resolution colormap visualization of a segmentation mask
     
@@ -25,12 +25,11 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
         upscale_factor: Factor to upscale the image (1.0 = original size)
         contrast_enhancement: Whether to apply contrast enhancement
         edge_enhancement: Whether to apply edge enhancement
-        view_type: View orientation ('axial', 'coronal', 'sagittal')
         
     Returns:
         PIL Image object containing the visualization
     """
-    logging.info(f"Creating high-res visualization with slice_idx={slice_idx}, upscale_factor={upscale_factor}, view_type={view_type}")
+    logging.info(f"Creating high-res visualization with slice_idx={slice_idx}, upscale_factor={upscale_factor}")
     logging.info(f"Segmentation shape: {segmentation.shape}, unique values: {np.unique(segmentation)}")
     if original_image is not None:
         logging.info(f"Original image shape: {original_image.shape}")
@@ -50,24 +49,8 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
         }
     
     # Determine which slice to use and ensure it's valid
-    # Handle different view orientations by adjusting the axis
-    if view_type.lower() == 'coronal':
-        # Coronal view: slice along the anterior-posterior axis (axis 1)
-        axis_index = 1
-        max_slices = segmentation.shape[1]
-    elif view_type.lower() == 'sagittal':
-        # Sagittal view: slice along the left-right axis (axis 2)
-        axis_index = 2
-        max_slices = segmentation.shape[2]
-    else:
-        # Axial view (default): slice along the superior-inferior axis (axis 0)
-        axis_index = 0
-        max_slices = segmentation.shape[0]
-    
-    logging.info(f"Using view type: {view_type}, axis: {axis_index}, max slices: {max_slices}")
-    
     if slice_idx is None:
-        slice_idx = max_slices // 2  # Middle slice
+        slice_idx = segmentation.shape[0] // 2  # Middle slice
         logging.info(f"No slice index provided, using middle slice: {slice_idx}")
     else:
         # Ensure slice_idx is an integer
@@ -76,67 +59,36 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
             logging.info(f"Using provided slice index: {slice_idx}")
         except (ValueError, TypeError):
             logging.error(f"Invalid slice_idx: {slice_idx}, must be an integer")
-            slice_idx = max_slices // 2
+            slice_idx = segmentation.shape[0] // 2
             logging.info(f"Using middle slice instead: {slice_idx}")
         
         # Make sure the slice index is within bounds
         if slice_idx < 0:
             logging.warning(f"Slice index {slice_idx} was negative, using slice 0 instead")
             slice_idx = 0
-        elif slice_idx >= max_slices:
-            max_idx = max_slices - 1
+        elif slice_idx >= segmentation.shape[0]:
+            max_idx = segmentation.shape[0] - 1
             logging.warning(f"Slice index {slice_idx} was too large (max={max_idx}), using slice {max_idx} instead")
             slice_idx = max_idx
     
-    logging.info(f"Final slice index: {slice_idx} (valid range: 0-{max_slices-1})")
+    logging.info(f"Final slice index: {slice_idx} (valid range: 0-{segmentation.shape[0]-1})")
     
-    # Extract the requested slice with error handling based on view orientation
-    orig_slice = None  # Initialize to None
+    # Extract the requested slice with error handling
     try:
         if len(segmentation.shape) == 3:
-            if axis_index == 0:  # Axial
-                mask_slice = segmentation[slice_idx, :, :]
-                if original_image is not None:
-                    orig_slice = original_image[slice_idx, :, :] if original_image.ndim == 3 else original_image[slice_idx, :, :, 0]
-            elif axis_index == 1:  # Coronal
-                mask_slice = segmentation[:, slice_idx, :]
-                if original_image is not None:
-                    orig_slice = original_image[:, slice_idx, :] if original_image.ndim == 3 else original_image[:, slice_idx, :, 0]
-            else:  # Sagittal (axis_index == 2)
-                mask_slice = segmentation[:, :, slice_idx]
-                if original_image is not None:
-                    orig_slice = original_image[:, :, slice_idx] if original_image.ndim == 3 else original_image[:, :, slice_idx, 0]
+            mask_slice = segmentation[slice_idx, :, :]
         else:
             # If the mask has an additional dimension (e.g., one-hot encoding)
-            if axis_index == 0:  # Axial
-                mask_slice = np.argmax(segmentation[slice_idx, :, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[slice_idx, :, :]
-            elif axis_index == 1:  # Coronal
-                mask_slice = np.argmax(segmentation[:, slice_idx, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[:, slice_idx, :]
-            else:  # Sagittal
-                mask_slice = np.argmax(segmentation[:, :, slice_idx], axis=-1) if segmentation.shape[-1] > 1 else segmentation[:, :, slice_idx]
-                
-            if original_image is not None:
-                if axis_index == 0:  # Axial
-                    orig_slice = original_image[slice_idx, :, :] if original_image.ndim == 3 else original_image[slice_idx, :, :, 0]
-                elif axis_index == 1:  # Coronal
-                    orig_slice = original_image[:, slice_idx, :] if original_image.ndim == 3 else original_image[:, slice_idx, :, 0]
-                else:  # Sagittal
-                    orig_slice = original_image[:, :, slice_idx] if original_image.ndim == 3 else original_image[:, :, slice_idx, 0]
+            mask_slice = np.argmax(segmentation[slice_idx, :, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[slice_idx, :, :]
         
         logging.info(f"Extracted mask slice with shape: {mask_slice.shape}, unique values: {np.unique(mask_slice)}")
     
     except Exception as e:
         logging.error(f"Error extracting mask slice: {str(e)}, details: {type(e).__name__}")
         # Fallback to middle slice if there was an error
-        middle_slice = max_slices // 2
-        if axis_index == 0:  # Axial
-            mask_slice = segmentation[middle_slice, :, :]
-        elif axis_index == 1:  # Coronal
-            mask_slice = segmentation[:, middle_slice, :]
-        else:  # Sagittal
-            mask_slice = segmentation[:, :, middle_slice]
+        middle_slice = segmentation.shape[0] // 2
+        mask_slice = segmentation[middle_slice, :, :]
         logging.info(f"Using fallback middle slice {middle_slice} instead")
-        orig_slice = None  # Reset to None on error
     
     # Create a colored visualization
     colors = np.zeros((*mask_slice.shape, 4))
@@ -153,39 +105,45 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
         colors[:] = (0, 0, 0, 0)
     
     # If original image provided, use it as background with enhanced contrast
-    if orig_slice is not None:
-        # Apply advanced image enhancement with our utility function
-        if contrast_enhancement:
-            try:
-                # Normalize to 0-1 range for consistency
-                if orig_slice.min() != orig_slice.max():
-                    norm_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
-                    img_8bit = (norm_slice * 255).astype(np.uint8)
-                else:
-                    img_8bit = np.zeros_like(orig_slice, dtype=np.uint8)
-                
-                # Apply enhanced image processing
-                enhanced_img = enhance_original_image(
-                    img_8bit, 
-                    contrast_enhancement=True,
-                    denoise=True,
-                    detail_enhancement=edge_enhancement,
-                    histogram_equalization='adaptive'
-                )
-                
-                # Convert back to float in range 0-1
-                orig_slice = enhanced_img / 255.0
-            except Exception as e:
-                logging.warning(f"Advanced image enhancement failed: {str(e)}, falling back to basic normalization")
-                # Fall back to basic normalization
+    if original_image is not None:
+        if slice_idx < original_image.shape[0]:
+            orig_slice = original_image[slice_idx]
+            
+            # Apply advanced image enhancement with our utility function
+            if contrast_enhancement:
+                try:
+                    # Normalize to 0-1 range for consistency
+                    if orig_slice.min() != orig_slice.max():
+                        norm_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
+                        img_8bit = (norm_slice * 255).astype(np.uint8)
+                    else:
+                        img_8bit = np.zeros_like(orig_slice, dtype=np.uint8)
+                    
+                    # Apply enhanced image processing
+                    enhanced_img = enhance_original_image(
+                        img_8bit, 
+                        contrast_enhancement=True,
+                        denoise=True,
+                        detail_enhancement=edge_enhancement,
+                        histogram_equalization='adaptive'
+                    )
+                    
+                    # Convert back to float in range 0-1
+                    orig_slice = enhanced_img / 255.0
+                except Exception as e:
+                    logging.warning(f"Advanced image enhancement failed: {str(e)}, falling back to basic normalization")
+                    # Fall back to basic normalization
+                    if orig_slice.min() != orig_slice.max():
+                        orig_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
+            else:
+                # Basic normalization if no enhancement requested
                 if orig_slice.min() != orig_slice.max():
                     orig_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
         else:
-            # Basic normalization if no enhancement requested
-            if orig_slice.min() != orig_slice.max():
-                orig_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
+            # If slice index out of range, create blank background
+            orig_slice = np.zeros_like(mask_slice, dtype=float)
     else:
-        # Create a grayscale background if no original image or slice extraction failed
+        # Create a grayscale background if no original image
         orig_slice = np.zeros_like(mask_slice, dtype=float)
     
     # Enhance segmentation mask for better visualization if quality is high

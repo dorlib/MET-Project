@@ -19,7 +19,14 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from preprocessing import preprocess_nifti_t1ce_for_model
 
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS with specific settings to handle preflight requests
+CORS(app, 
+     origins=['http://localhost:3000'],  # Allow frontend origin
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],  # Allow necessary methods
+     allow_headers=['Content-Type', 'Authorization'],  # Allow necessary headers
+     supports_credentials=True)  # Allow credentials if needed
+
 logging.basicConfig(level=logging.INFO)
 
 MODEL_SERVICE_URL = os.environ.get('MODEL_SERVICE_URL', 'http://model-service:5001')
@@ -67,6 +74,28 @@ def token_required(f):
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "healthy", "service": "api-gateway"})
+
+# Add explicit OPTIONS handler for all auth routes
+@app.route('/auth/<path:path>', methods=['OPTIONS'])
+def handle_auth_options(path):
+    """Handle preflight OPTIONS requests for auth routes"""
+    response = jsonify({'status': 'OK'})
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
+# Add a catch-all OPTIONS handler
+@app.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    """Handle preflight OPTIONS requests for all routes"""
+    response = jsonify({'status': 'OK'})
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
 
 @app.route('/models', methods=['GET'])
 def list_available_models():
@@ -591,6 +620,57 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/auth/validate', methods=['GET'])
+def validate_token():
+    """
+    Validate a JWT token
+    """
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({'error': 'Authentication token is missing'}), 401
+        
+    token = auth_header.split(' ')[1]
+    
+    try:
+        # Forward to user service for validation
+        response = requests.get(
+            f"{USER_SERVICE_URL}/user",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        
+        if response.status_code == 200:
+            return jsonify({'valid': True, 'user': response.json()}), 200
+        else:
+            return jsonify({'valid': False, 'error': 'Invalid token'}), 401
+            
+    except Exception as e:
+        logging.error(f"Error validating token: {str(e)}")
+        return jsonify({'valid': False, 'error': str(e)}), 500
+
+@app.route('/auth/refresh', methods=['POST'])
+def refresh_token():
+    """
+    Refresh a JWT token
+    """
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({'error': 'Authentication token is missing'}), 401
+        
+    try:
+        # Forward to user service for token refresh
+        response = requests.post(
+            f"{USER_SERVICE_URL}/refresh",
+            headers={"Authorization": auth_header}
+        )
+        
+        return response.json(), response.status_code
+        
+    except Exception as e:
+        logging.error(f"Error refreshing token: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/user/profile', methods=['GET'])
 @token_required
 def get_profile():
@@ -599,6 +679,44 @@ def get_profile():
     """
     # User data is already attached to request by token_required decorator
     return jsonify(request.user)
+
+@app.route('/user/settings', methods=['GET'])
+@token_required
+def get_user_settings():
+    """
+    Get authenticated user's settings
+    """
+    try:
+        # Forward to user service with token
+        auth_header = request.headers.get('Authorization')
+        
+        response = requests.get(
+            f"{USER_SERVICE_URL}/settings",
+            headers={"Authorization": auth_header}
+        )
+        
+        if response.status_code == 200:
+            return response.json(), 200
+        else:
+            # Return default settings if user service doesn't have this endpoint
+            return jsonify({
+                'two_fa_enabled': False,
+                'notification_preferences': {
+                    'email_notifications': True,
+                    'processing_complete': True
+                }
+            }), 200
+            
+    except Exception as e:
+        logging.error(f"Error fetching user settings: {str(e)}")
+        # Return default settings on error
+        return jsonify({
+            'two_fa_enabled': False,
+            'notification_preferences': {
+                'email_notifications': True,
+                'processing_complete': True
+            }
+        }), 200
 
 @app.route('/auth/logout', methods=['POST'])
 @token_required
@@ -980,44 +1098,3 @@ def get_three_plane_visualization(job_id):
     except Exception as e:
         logging.error(f"Error generating three-plane visualization for job {job_id}: {str(e)}")
         return jsonify({"error": f"Visualization failed: {str(e)}"}), 500
-
-@app.route('/download/prediction/<job_id>', methods=['GET'])
-def download_prediction_file(job_id):
-    """
-    Endpoint to download the prediction .npy file for a completed job
-    """
-    # Validate job_id format to prevent path traversal
-    if '/' in job_id or '\\' in job_id or '..' in job_id:
-        return jsonify({"error": "Invalid job ID format"}), 400
-    
-    try:
-        # Check if the job is completed
-        model_status_response = requests.get(f"{MODEL_SERVICE_URL}/status/{job_id}")
-        
-        if model_status_response.status_code != 200:
-            return jsonify({"error": "Job not found"}), 404
-            
-        model_status = model_status_response.json()
-        if model_status.get("status") != "completed":
-            return jsonify({"error": "Job not completed yet"}), 400
-        
-        # Try to get the prediction file from the results folder
-        prediction_file_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
-        
-        if not os.path.exists(prediction_file_path):
-            return jsonify({"error": "Prediction file not found"}), 404
-        
-        # Log the download request
-        logging.info(f"Downloading prediction file for job {job_id}")
-        
-        # Return the file as a download
-        return send_file(
-            prediction_file_path,
-            as_attachment=True,
-            download_name=f"{job_id}_prediction.npy",
-            mimetype='application/octet-stream'
-        )
-        
-    except Exception as e:
-        logging.error(f"Error downloading prediction file for job {job_id}: {str(e)}")
-        return jsonify({"error": f"Download failed: {str(e)}"}), 500

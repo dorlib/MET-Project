@@ -41,8 +41,12 @@ const apiService = {
     return api.get('/auth/validate');
   },
   
+  logout: () => {
+    return api.post('/auth/logout');
+  },
+  
   // Scan upload and analysis with retry functionality
-  uploadScan: async (formData, onProgress, modelName = null) => {
+  uploadScan: async (formData, onProgress) => {
     // Configuration
     const maxRetries = 3;
     const retryDelay = 2000; // 2 seconds
@@ -50,10 +54,7 @@ const apiService = {
     
     const makeRequest = async () => {
       try {
-        // Add model parameter to the URL if specified
-        const uploadUrl = modelName ? `/upload?model=${encodeURIComponent(modelName)}` : '/upload';
-        
-        return await api.post(uploadUrl, formData, {
+        return await api.post('/upload', formData, {
           // Don't set Content-Type header - let the browser set it automatically for FormData
           // This ensures multipart/form-data is used with proper boundaries
           timeout: 60000, // 60 seconds timeout
@@ -83,11 +84,6 @@ const apiService = {
     };
     
     return makeRequest();
-  },
-  
-  // Get available models
-  getModels: () => {
-    return api.get('/models');
   },
   
   getJobStatus: (jobId) => {
@@ -232,6 +228,11 @@ const apiService = {
   getUserSettings: () => {
     return api.get('/user/settings');
   },
+  
+  // Add missing getModels function
+  getModels: () => {
+    return api.get('/models');
+  },
 
   deleteScan: (scanId) => {
     return api.delete(`/user/scans/${scanId}`);
@@ -246,13 +247,6 @@ const apiService = {
   
   exportResultsPDF: (jobId) => {
     return api.get(`/export/pdf/${jobId}`, {
-      responseType: 'blob'
-    });
-  },
-
-  // Download raw prediction/mask file (.npy format)
-  downloadPrediction: (jobId) => {
-    return api.get(`/download/prediction/${jobId}`, {
       responseType: 'blob'
     });
   },
@@ -341,21 +335,6 @@ const apiService = {
     
     const endpoint = quality === 'high' ? 'advanced-visualization' : 'visualization';
     return api.get(`/${endpoint}/${jobId}`, { params, responseType: 'blob' });
-  },
-  
-  // Get segmentation data for 3D visualization
-  getSegmentationData: (jobId, options = {}) => {
-    const {
-      downsample = 2,
-      max_voxels = 50000
-    } = options;
-    
-    const params = {
-      downsample,
-      max_voxels
-    };
-    
-    return api.get(`/segmentation-data/${jobId}`, { params });
   },
   
   // 2FA

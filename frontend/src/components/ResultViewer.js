@@ -17,16 +17,13 @@ import {
   Tabs,
   Tab,
   Button,
-  Stack,
-  FormControlLabel,
-  Switch,
-  Slider
+  Stack
 } from '@mui/material';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend } from 'chart.js';
+import Visualization3DPlaceholder from './Visualization3DPlaceholder';
 import VisualizationControls from './VisualizationControls';
-import Interactive3DViewer from './Interactive3DViewer';
-import { PictureAsPdf, TableChart, CloudDownload } from '@mui/icons-material';
+import { PictureAsPdf, TableChart } from '@mui/icons-material';
 import api from '../services/api';
 
 // Register Chart.js components
@@ -49,8 +46,6 @@ const ResultViewer = ({ jobId, status, results }) => {
   
   // Additional state for 2D view types (axial, coronal, sagittal)
   const [viewType, setViewType] = useState('axial');
-  // Store all volume dimensions to handle different view orientations
-  const [volumeDimensions, setVolumeDimensions] = useState(null);
   // Additional state for three-plane view
   const [axialSliceIndex, setAxialSliceIndex] = useState(50);
   const [coronalSliceIndex, setCoronalSliceIndex] = useState(50);
@@ -114,13 +109,13 @@ const ResultViewer = ({ jobId, status, results }) => {
   useEffect(() => {
     // Only log debugging info when we have completed status
     if (status === 'completed' && jobId && results) {
-      // console.log("Debug - Component rendering with:", {
-      //   jobId,
-      //   status,
-      //   sliceIndex: ensureValidSlice(sliceIndex),
-      //   sliceInitialized,
-      //   hasSegmentationPath: !!results?.segmentation_path
-      // });
+      console.log("Debug - Component rendering with:", {
+        jobId,
+        status,
+        sliceIndex: ensureValidSlice(sliceIndex),
+        sliceInitialized,
+        hasSegmentationPath: !!results?.segmentation_path
+      });
       
       // Only log URL when we have results
       if (getVisualizationUrl() !== '#') {
@@ -136,8 +131,8 @@ const ResultViewer = ({ jobId, status, results }) => {
     try {
       console.log('Testing getResults API call...');
       const response = await api.getResults(jobId);
-      // console.log('Raw results response:', response);
-      // console.log('Results data:', response.data);
+      console.log('Raw results response:', response);
+      console.log('Results data:', response.data);
       console.log('segmentation_path present:', !!response.data?.segmentation_path);
       
       if (response.data?.segmentation_path) {
@@ -228,7 +223,7 @@ const ResultViewer = ({ jobId, status, results }) => {
   // Monitor when results change
   useEffect(() => {
     if (results) {
-      // console.log("Results updated:", results);
+      console.log("Results updated:", results);
       console.log("Results contains segmentation_path:", results.segmentation_path ? "Yes" : "No");
     }
   }, [results]);
@@ -250,32 +245,6 @@ const ResultViewer = ({ jobId, status, results }) => {
     }
   }, [sliceIndex, jobId, sliceInitialized, ensureValidSlice]);
   
-  // Update max slice index when view type changes
-  useEffect(() => {
-    if (volumeDimensions && volumeDimensions.length >= 3) {
-      let newMaxSliceIndex;
-      
-      // Set max slice index based on view orientation
-      if (viewType === 'coronal') {
-        // Coronal view: slice along anterior-posterior axis (dimension 1)
-        newMaxSliceIndex = volumeDimensions[1] - 1;
-      } else if (viewType === 'sagittal') {
-        // Sagittal view: slice along left-right axis (dimension 2)
-        newMaxSliceIndex = volumeDimensions[2] - 1;
-      } else {
-        // Axial view: slice along superior-inferior axis (dimension 0)
-        newMaxSliceIndex = volumeDimensions[0] - 1;
-      }
-      
-      console.log(`View type changed to ${viewType}, updating maxSliceIndex to ${newMaxSliceIndex}`);
-      setMaxSliceIndex(newMaxSliceIndex);
-      
-      // Reset slice index to middle of new range
-      const middleSlice = Math.floor(newMaxSliceIndex / 2);
-      setSliceIndex(middleSlice);
-    }
-  }, [viewType, volumeDimensions]);
-
   // Function to fetch volume dimensions from the backend
   // Function has been moved inside the useEffect below
   
@@ -289,15 +258,11 @@ const ResultViewer = ({ jobId, status, results }) => {
         
         if (response.status === 200) {
           const data = response.data;
-          // console.log("Volume dimensions data:", data);
+          console.log("Volume dimensions data:", data);
           
           if (data.dimensions && data.dimensions.length > 0) {
-            // Store all volume dimensions for different view orientations
-            console.log("Setting volume dimensions:", data.dimensions);
-            setVolumeDimensions(data.dimensions);
-            
-            // Update max slice index based on current view type (initially axial)
-            const newMaxSliceIndex = data.dimensions[0] - 1; // Axial by default
+            // Update max slice index based on z-dimension (depth)
+            const newMaxSliceIndex = data.dimensions[0] - 1; // 0-based index
             console.log("Setting maxSliceIndex to:", newMaxSliceIndex);
             setMaxSliceIndex(newMaxSliceIndex);
             
@@ -327,9 +292,6 @@ const ResultViewer = ({ jobId, status, results }) => {
         } else {
           // If the endpoint doesn't exist or fails, use volume stats from results
           if (results && results.volume_dimensions) {
-            console.log("Using results volume_dimensions:", results.volume_dimensions);
-            setVolumeDimensions(results.volume_dimensions);
-            
             const newMaxSliceIndex = results.volume_dimensions[0] - 1;
             console.log("Using results volume_dimensions, setting maxSliceIndex to:", newMaxSliceIndex);
             setMaxSliceIndex(newMaxSliceIndex);
@@ -408,31 +370,6 @@ const ResultViewer = ({ jobId, status, results }) => {
     }
   };
 
-  // Handle downloading raw prediction file
-  const handleDownloadPrediction = async () => {
-    try {
-      setExporting(true);
-      
-      const response = await api.downloadPrediction(jobId);
-      
-      // Create a download link for the blob
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `prediction_mask_${jobId}.npy`);
-      document.body.appendChild(link);
-      link.click();
-      
-      // Clean up
-      link.parentNode.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error downloading prediction file:', error);
-    } finally {
-      setExporting(false);
-    }
-  };
-
   // For pending status
   if (status !== 'completed') {
     // Handle error states specially
@@ -474,10 +411,10 @@ const ResultViewer = ({ jobId, status, results }) => {
   
   // Prepare chart data
   const chartData = {
-    labels: (metastasis_volumes || []).map((_, index) => `Metastasis ${index + 1}`),
+    labels: metastasis_volumes.map((_, index) => `Metastasis ${index + 1}`),
     datasets: [
       {
-        data: metastasis_volumes || [],
+        data: metastasis_volumes,
         backgroundColor: [
           '#FF6384',
           '#36A2EB',
@@ -507,13 +444,13 @@ const ResultViewer = ({ jobId, status, results }) => {
   };
 
   // Add debugging for segmentation_path and visualization params
-  // console.log("Debug - Results object:", results);
-  // console.log("Debug - Segmentation path exists:", results?.segmentation_path ? "Yes" : "No");
-  // console.log("Debug - Current visualization settings:", { 
-  //   vizType, vizQuality, sliceIndex, 
-  //   upscaleFactor, enhanceContrast, enhanceEdges, 
-  //   maxSliceIndex
-  // });
+  console.log("Debug - Results object:", results);
+  console.log("Debug - Segmentation path exists:", results?.segmentation_path ? "Yes" : "No");
+  console.log("Debug - Current visualization settings:", { 
+    vizType, vizQuality, sliceIndex, 
+    upscaleFactor, enhanceContrast, enhanceEdges, 
+    maxSliceIndex
+  });
   
   return (
     <Box sx={{ p: 3 }}>
@@ -590,16 +527,6 @@ const ResultViewer = ({ jobId, status, results }) => {
                 </Button>
                 
                 <Button 
-                  variant="contained" 
-                  color="success" 
-                  onClick={handleDownloadPrediction}
-                  disabled={exporting}
-                  startIcon={<CloudDownload />}
-                >
-                  {exporting ? 'Downloading...' : 'Download Prediction Mask (.npy)'}
-                </Button>
-                
-                <Button 
                   variant="outlined" 
                   color="primary" 
                   onClick={testResultsApi}
@@ -631,15 +558,7 @@ const ResultViewer = ({ jobId, status, results }) => {
       </Tabs>
       
       {tabValue === 0 && (
-        <Interactive3DViewer 
-          jobId={jobId}
-          status={status}
-          results={results}
-          enhanceContrast={enhanceContrast}
-          setEnhanceContrast={setEnhanceContrast}
-          enhanceEdges={enhanceEdges}
-          setEnhanceEdges={setEnhanceEdges}
-        />
+        <Visualization3DPlaceholder jobId={jobId} />
       )}
       
       {tabValue === 1 && (
@@ -752,7 +671,7 @@ const ResultViewer = ({ jobId, status, results }) => {
                       e.target.dataset.fallbackAttempted = 'true';
                       console.log('Retrying with fallback URL');
                       // Try showing the original image without segmentation
-                      const fallbackUrl = `/visualization/${jobId}?quality=high&upscale=2&enhance_contrast=true&enhance_edges=true&type=${vizType}&slice_idx=${ensureValidSlice(sliceIndex)}&view_type=${viewType}&show_original=true&brightness=1.5&contrast=1.8`;
+                      const fallbackUrl = `/visualization/${jobId}?quality=high&upscale=2&enhance_contrast=true&enhance_edges=true&type=${vizType}&slice_idx=${ensureValidSlice(sliceIndex)}&show_original=true&brightness=1.5&contrast=1.8`;
                       e.target.src = fallbackUrl;
                     } else {
                       // Hide spinner on failure

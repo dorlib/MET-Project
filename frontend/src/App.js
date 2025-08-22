@@ -10,6 +10,7 @@ import AuthPage from './components/AuthPage';
 import UserProfile from './components/UserProfile';
 import ScanDetails from './components/ScanDetails';
 import ErrorNotification from './components/ErrorNotification';
+import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import api from './services/api';
 
@@ -397,16 +398,18 @@ function App() {
   );
 
   return (
-    <ColorModeContext.Provider value={colorMode}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <AuthProvider>
-          <Router>
-            <MainContent />
-          </Router>
-        </AuthProvider>
-      </ThemeProvider>
-    </ColorModeContext.Provider>
+    <ErrorBoundary>
+      <ColorModeContext.Provider value={colorMode}>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <AuthProvider>
+            <Router>
+              <MainContent />
+            </Router>
+          </AuthProvider>
+        </ThemeProvider>
+      </ColorModeContext.Provider>
+    </ErrorBoundary>
   );
 }
 

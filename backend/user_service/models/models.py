@@ -19,8 +19,6 @@ class User(Base):
     
     # Relationship with scans
     scans = relationship("Scan", back_populates="user", cascade="all, delete-orphan")
-    # Relationship with shares
-    shared_links = relationship("Share", back_populates="creator", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(name='{self.name}', email='{self.email}')>"
@@ -70,35 +68,4 @@ class Scan(Base):
             "metastasis_count": self.metastasis_count,
             "total_volume": self.total_volume,
             "metastasis_volumes": metastasis_volumes
-        }
-
-class Share(Base):
-    __tablename__ = 'shares'
-    
-    id = Column(Integer, primary_key=True)
-    share_token = Column(String(255), unique=True, nullable=False)
-    job_id = Column(String(36), nullable=False)
-    created_by = Column(Integer, ForeignKey('users.id'), nullable=False)
-    expires_at = Column(Integer, nullable=False)  # Unix timestamp
-    allow_download = Column(Boolean, default=False)
-    include_detailed_analysis = Column(Boolean, default=False)
-    created_at = Column(Integer, nullable=False)  # Unix timestamp
-    is_revoked = Column(Boolean, default=False)
-    
-    # Relationship with user
-    creator = relationship("User", back_populates="shared_links")
-    
-    def __repr__(self):
-        return f"<Share(token='{self.share_token}', job_id='{self.job_id}')>"
-    
-    def to_dict(self):
-        return {
-            "share_token": self.share_token,
-            "job_id": self.job_id,
-            "created_by": self.created_by,
-            "expires_at": self.expires_at,
-            "allow_download": self.allow_download,
-            "include_detailed_analysis": self.include_detailed_analysis,
-            "created_at": self.created_at,
-            "is_revoked": self.is_revoked
         }

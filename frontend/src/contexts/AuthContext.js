@@ -25,15 +25,43 @@ export const AuthProvider = ({ children }) => {
           // Set default auth header for future requests
           api.setAuthHeader(token);
 
-          // Get user profile to validate token
-          const response = await api.getUserProfile();
-          setCurrentUser({
-            ...JSON.parse(userData),
-            // Update with any new info from server
-            ...response.data
-          });
+          // First try to validate the token using the validate endpoint
+          try {
+            await api.validateToken();
+            // If validation succeeds, get user profile
+            const response = await api.getUserProfile();
+            setCurrentUser({
+              ...JSON.parse(userData),
+              // Update with any new info from server
+              ...response.data
+            });
+          } catch (validateError) {
+            // If validation fails, try refresh token or logout
+            console.warn('Token validation failed, attempting refresh or logout:', validateError);
+            
+            try {
+              // Try to refresh the token
+              const refreshResponse = await api.refreshToken();
+              const newToken = refreshResponse.data.token;
+              
+              // Update stored token and header
+              localStorage.setItem('authToken', newToken);
+              api.setAuthHeader(newToken);
+              
+              // Get updated user profile
+              const profileResponse = await api.getUserProfile();
+              setCurrentUser({
+                ...JSON.parse(userData),
+                ...profileResponse.data
+              });
+            } catch (refreshError) {
+              // If refresh also fails, clear the session
+              console.error('Token refresh failed:', refreshError);
+              logout();
+            }
+          }
         } catch (err) {
-          console.error('Token validation failed:', err);
+          console.error('Authentication initialization failed:', err);
           // Clear invalid session
           logout();
         }
@@ -107,7 +135,12 @@ export const AuthProvider = ({ children }) => {
     try {
       // Call the logout endpoint if user is authenticated
       if (currentUser) {
-        await api.logout();
+        try {
+          await api.logout();
+        } catch (logoutError) {
+          console.warn('Server logout failed, continuing with local logout:', logoutError);
+          // Continue with local logout even if server request fails
+        }
       }
     } catch (err) {
       console.error('Logout error:', err);
@@ -122,6 +155,7 @@ export const AuthProvider = ({ children }) => {
       
       // Update state
       setCurrentUser(null);
+      setError(null); // Clear any existing errors on logout
       setLoading(false);
     }
   };

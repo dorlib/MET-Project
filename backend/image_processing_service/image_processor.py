@@ -3,7 +3,6 @@
 
 import os
 import numpy as np
-import glob
 from flask import Flask, jsonify, request, send_file, Response
 import logging
 from scipy import ndimage
@@ -65,7 +64,7 @@ def load_volume_data(file_path):
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 
-def create_colormap_visualization(segmentation, original_image=None, slice_idx=None, view_type='axial'):
+def create_colormap_visualization(segmentation, original_image=None, slice_idx=None):
     """
     Create a high-resolution colormap visualization of a segmentation mask
     
@@ -73,61 +72,20 @@ def create_colormap_visualization(segmentation, original_image=None, slice_idx=N
         segmentation: 3D segmentation mask
         original_image: Optional original 3D image
         slice_idx: Optional slice index, if None middle slice will be used
-        view_type: View orientation ('axial', 'coronal', 'sagittal')
         
     Returns:
         PIL Image object containing the visualization
     """
-    # Handle different view orientations by adjusting the axis
-    if view_type.lower() == 'coronal':
-        # Coronal view: slice along the anterior-posterior axis (axis 1)
-        axis_index = 1
-        max_slices = segmentation.shape[1]
-    elif view_type.lower() == 'sagittal':
-        # Sagittal view: slice along the left-right axis (axis 2)
-        axis_index = 2
-        max_slices = segmentation.shape[2]
-    else:
-        # Axial view (default): slice along the superior-inferior axis (axis 0)
-        axis_index = 0
-        max_slices = segmentation.shape[0]
-    
     # Determine which slice to use
     if slice_idx is None:
-        slice_idx = max_slices // 2  # Middle slice
+        slice_idx = segmentation.shape[0] // 2  # Middle slice
     
-    # Ensure slice index is within bounds
-    slice_idx = max(0, min(slice_idx, max_slices - 1))
-    
-    # Extract the requested slice based on view orientation
-    orig_slice = None  # Initialize to None
+    # Extract the requested slice
     if len(segmentation.shape) == 3:
-        if axis_index == 0:  # Axial
-            mask_slice = segmentation[slice_idx, :, :]
-            if original_image is not None and slice_idx < original_image.shape[0]:
-                orig_slice = original_image[slice_idx, :, :] if original_image.ndim == 3 else original_image[slice_idx, :, :, 0]
-        elif axis_index == 1:  # Coronal
-            mask_slice = segmentation[:, slice_idx, :]
-            if original_image is not None and slice_idx < original_image.shape[1]:
-                orig_slice = original_image[:, slice_idx, :] if original_image.ndim == 3 else original_image[:, slice_idx, :, 0]
-        else:  # Sagittal (axis_index == 2)
-            mask_slice = segmentation[:, :, slice_idx]
-            if original_image is not None and slice_idx < original_image.shape[2]:
-                orig_slice = original_image[:, :, slice_idx] if original_image.ndim == 3 else original_image[:, :, slice_idx, 0]
+        mask_slice = segmentation[slice_idx, :, :]
     else:
         # If the mask has an additional dimension (e.g., one-hot encoding)
-        if axis_index == 0:  # Axial
-            mask_slice = np.argmax(segmentation[slice_idx, :, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[slice_idx, :, :]
-            if original_image is not None and slice_idx < original_image.shape[0]:
-                orig_slice = original_image[slice_idx, :, :] if original_image.ndim == 3 else original_image[slice_idx, :, :, 0]
-        elif axis_index == 1:  # Coronal
-            mask_slice = np.argmax(segmentation[:, slice_idx, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[:, slice_idx, :]
-            if original_image is not None and slice_idx < original_image.shape[1]:
-                orig_slice = original_image[:, slice_idx, :] if original_image.ndim == 3 else original_image[:, slice_idx, :, 0]
-        else:  # Sagittal
-            mask_slice = np.argmax(segmentation[:, :, slice_idx], axis=-1) if segmentation.shape[-1] > 1 else segmentation[:, :, slice_idx]
-            if original_image is not None and slice_idx < original_image.shape[2]:
-                orig_slice = original_image[:, :, slice_idx] if original_image.ndim == 3 else original_image[:, :, slice_idx, 0]
+        mask_slice = np.argmax(segmentation[slice_idx, :, :], axis=-1) if segmentation.shape[-1] > 1 else segmentation[slice_idx, :, :]
     
     # Create a colored visualization
     colors = np.zeros((*mask_slice.shape, 4))
@@ -143,15 +101,20 @@ def create_colormap_visualization(segmentation, original_image=None, slice_idx=N
         colors[:] = (0, 0, 0, 0)
     
     # If original image provided, use it as background
-    if orig_slice is not None:
-        # Normalize the original image for display
-        if orig_slice.min() != orig_slice.max():
-            orig_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
-            
-        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to enhance contrast
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced_slice = clahe.apply((orig_slice * 255).astype(np.uint8))
-        orig_slice = enhanced_slice / 255.0
+    if original_image is not None:
+        if slice_idx < original_image.shape[0]:
+            orig_slice = original_image[slice_idx]
+            # Normalize the original image for display
+            if orig_slice.min() != orig_slice.max():
+                orig_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
+                
+            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to enhance contrast
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced_slice = clahe.apply((orig_slice * 255).astype(np.uint8))
+            orig_slice = enhanced_slice / 255.0
+        else:
+            # If slice index out of range, create blank background
+            orig_slice = np.zeros_like(mask_slice, dtype=float)
     else:
         # Create a grayscale background if no original image
         orig_slice = np.zeros_like(mask_slice, dtype=float)
@@ -175,9 +138,8 @@ def create_colormap_visualization(segmentation, original_image=None, slice_idx=N
     # Overlay the colormap visualization
     plt.imshow(colors, alpha=0.7, interpolation='nearest')
     
-    # Improved title with slice information and view type
-    view_name = view_type.capitalize()
-    plt.title(f"{view_name} View - Segmentation (Slice {slice_idx}/{max_slices-1})", fontsize=14)
+    # Improved title with slice information
+    plt.title(f"Segmentation Visualization (Slice {slice_idx}/{segmentation.shape[0]-1})", fontsize=14)
     plt.axis('off')  # Hide axes
     
     # Reduce padding to maximize image size
@@ -873,14 +835,7 @@ def get_visualization(job_id):
                 if quality == 'standard':
                     # Use the original lower resolution visualization for backward compatibility
                     logging.info("Using standard visualization method")
-                    
-                    # Get view type for standard visualization too
-                    view_type = request.args.get('view_type', 'axial')
-                    if view_type not in ['axial', 'coronal', 'sagittal']:
-                        logging.warning(f"Invalid view_type: {view_type}, defaulting to axial")
-                        view_type = 'axial'
-                    
-                    image = create_colormap_visualization(segmentation, original_image, slice_idx, view_type)
+                    image = create_colormap_visualization(segmentation, original_image, slice_idx)
                 else:
                     # Parse additional enhancement options from request parameters
                     try:
@@ -1822,266 +1777,3 @@ def calculate_confidence_metrics(segmentation_probs, segmentation_mask):
         import traceback
         traceback.print_exc()
         return None
-
-@app.route('/segmentation-data/<job_id>', methods=['GET'])
-def get_segmentation_data(job_id):
-    """
-    Get the raw segmentation data for 3D visualization
-    Returns downsampled segmentation data to avoid large transfers
-    """
-    if not job_id:
-        return jsonify({"error": "Missing job ID"}), 400
-        
-    # Validate job_id format
-    if '/' in job_id or '\\' in job_id or '..' in job_id:
-        return jsonify({"error": "Invalid job ID format"}), 400
-    
-    # Find the prediction file
-    pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
-    
-    if not os.path.exists(pred_path):
-        return jsonify({"error": "Segmentation not found"}), 404
-    
-    try:
-        # Load the segmentation mask
-        segmentation = np.load(pred_path)
-        logging.info(f"Loading segmentation data for 3D visualization. Shape: {segmentation.shape}")
-        
-        # Get downsampling factor from query params
-        downsample_factor = int(request.args.get('downsample', '2'))
-        downsample_factor = max(1, min(downsample_factor, 4))  # Limit between 1 and 4
-        
-        # Downsample if requested to reduce data size
-        if downsample_factor > 1:
-            scale_factor = 1.0 / downsample_factor
-            segmentation_downsampled = zoom(segmentation, (scale_factor, scale_factor, scale_factor), order=0)
-            logging.info(f"Downsampled segmentation from {segmentation.shape} to {segmentation_downsampled.shape}")
-        else:
-            segmentation_downsampled = segmentation
-        
-        # Find all non-zero voxels and their class labels
-        nonzero_indices = np.nonzero(segmentation_downsampled)
-        if len(nonzero_indices[0]) == 0:
-            return jsonify({
-                "job_id": job_id,
-                "voxels": [],
-                "shape": segmentation_downsampled.shape,
-                "classes": [],
-                "colors": {}
-            })
-        
-        # Get the class labels for non-zero voxels
-        voxel_classes = segmentation_downsampled[nonzero_indices].astype(int)
-        
-        # Create voxel data with positions and classes
-        voxels = []
-        for i in range(len(nonzero_indices[0])):
-            voxels.append({
-                "x": int(nonzero_indices[2][i]),  # Note: swapping to match web coordinate system
-                "y": int(nonzero_indices[1][i]),
-                "z": int(nonzero_indices[0][i]),
-                "class": int(voxel_classes[i])
-            })
-        
-        # Limit number of voxels to prevent huge transfers
-        max_voxels = int(request.args.get('max_voxels', '50000'))
-        if len(voxels) > max_voxels:
-            # Sample randomly to keep representative data
-            import random
-            voxels = random.sample(voxels, max_voxels)
-            logging.info(f"Sampled {max_voxels} voxels from {len(nonzero_indices[0])} total")
-        
-        # Get unique classes and create color mapping
-        unique_classes = list(set(voxel_classes))
-        colors = {}
-        for cls in unique_classes:
-            if cls in TISSUE_COLORS:
-                # Convert RGB to hex
-                rgb = TISSUE_COLORS[cls]
-                hex_color = "#{:02x}{:02x}{:02x}".format(
-                    int(rgb[0] * 255),
-                    int(rgb[1] * 255), 
-                    int(rgb[2] * 255)
-                )
-                colors[str(cls)] = hex_color
-            else:
-                # Default color for unknown classes
-                colors[str(cls)] = "#ffffff"
-        
-        result = {
-            "job_id": job_id,
-            "voxels": voxels,
-            "metadata": {
-                "shape": [int(dim) for dim in segmentation_downsampled.shape],
-                "original_shape": [int(dim) for dim in segmentation.shape],
-                "downsample_factor": downsample_factor,
-                "voxel_count": len(voxels),
-                "total_voxels": len(nonzero_indices[0])
-            },
-            "classes": {
-                str(cls): {
-                    "name": f"Class {cls}",
-                    "color": colors[str(cls)],
-                    "voxel_count": int(np.sum(np.array([v["class"] for v in voxels]) == cls))
-                }
-                for cls in unique_classes
-            },
-            "total_voxels": len(voxels)
-        }
-        
-        logging.info(f"Returning segmentation data: {len(voxels)} voxels, {len(unique_classes)} classes")
-        return jsonify(result)
-        
-    except Exception as e:
-        logging.error(f"Error getting segmentation data: {str(e)}")
-        return jsonify({"error": f"Failed to get segmentation data: {str(e)}"}), 500
-
-@app.route('/volume-dimensions/<job_id>', methods=['GET'])
-def get_volume_dimensions(job_id):
-    """
-    Get the dimensions of the volume for slice navigation
-    
-    Returns:
-    - dimensions: [width, height, depth] array for slice navigation
-    - spacing: voxel spacing information if available
-    """
-    try:
-        # Validate job_id
-        if not job_id or '/' in job_id or '..' in job_id:
-            return jsonify({"error": "Invalid job ID"}), 400
-        
-        # Look for the segmentation file
-        segmentation_path = None
-        for pattern in [f"*{job_id}*segmentation*.npy", f"*{job_id}*prediction*.npy"]:
-            matching_files = glob.glob(os.path.join(RESULTS_FOLDER, pattern))
-            if matching_files:
-                segmentation_path = matching_files[0]
-                break
-        
-        if not segmentation_path or not os.path.exists(segmentation_path):
-            return jsonify({"error": "Segmentation data not found"}), 404
-        
-        # Load the segmentation to get dimensions
-        segmentation = np.load(segmentation_path)
-        dimensions = list(segmentation.shape)
-        
-        # Try to get spacing information from original NIfTI if available
-        spacing = None
-        try:
-            # Look for original NIfTI file
-            for pattern in [f"*{job_id}*.nii.gz", f"*{job_id}*.nii"]:
-                matching_files = glob.glob(os.path.join(RESULTS_FOLDER, pattern))
-                if matching_files:
-                    nifti_img = nib.load(matching_files[0])
-                    spacing = nifti_img.header.get_zooms()[:3]  # x, y, z spacing
-                    break
-        except Exception as e:
-            logging.warning(f"Could not get spacing information: {e}")
-        
-        result = {
-            "job_id": job_id,
-            "dimensions": dimensions,
-            "spacing": list(spacing) if spacing else None,
-            "total_voxels": int(np.prod(dimensions))
-        }
-        
-        logging.info(f"Volume dimensions for {job_id}: {dimensions}")
-        return jsonify(result)
-        
-    except Exception as e:
-        logging.error(f"Error getting volume dimensions: {str(e)}")
-        return jsonify({"error": f"Failed to get volume dimensions: {str(e)}"}), 500
-
-@app.route('/download/prediction/<job_id>', methods=['GET'])
-def download_prediction_file(job_id):
-    """
-    Download the raw prediction/segmentation file (.npy format)
-    
-    Returns the original segmentation/prediction numpy array as a downloadable file
-    """
-    try:
-        # Validate job_id
-        if not job_id or '/' in job_id or '..' in job_id:
-            return jsonify({"error": "Invalid job ID"}), 400
-        
-        # Look for the prediction/segmentation file
-        prediction_path = None
-        
-        # Try different possible file patterns
-        patterns = [
-            f"*{job_id}*prediction*.npy",
-            f"*{job_id}*segmentation*.npy", 
-            f"*{job_id}*.npy"
-        ]
-        
-        for pattern in patterns:
-            matching_files = glob.glob(os.path.join(RESULTS_FOLDER, pattern))
-            if matching_files:
-                # Prefer files with "prediction" or "segmentation" in the name
-                for file_path in matching_files:
-                    filename = os.path.basename(file_path).lower()
-                    if 'prediction' in filename or 'segmentation' in filename:
-                        prediction_path = file_path
-                        break
-                
-                # If no specific prediction file found, use the first match
-                if not prediction_path:
-                    prediction_path = matching_files[0]
-                break
-        
-        if not prediction_path or not os.path.exists(prediction_path):
-            return jsonify({"error": "Prediction file not found"}), 404
-        
-        # Validate that it's actually a .npy file
-        if not prediction_path.lower().endswith('.npy'):
-            return jsonify({"error": "Invalid file format - not a .npy file"}), 400
-        
-        # Get file info
-        file_size = os.path.getsize(prediction_path)
-        filename = os.path.basename(prediction_path)
-        
-        # Try to load and validate the numpy array
-        try:
-            prediction_array = np.load(prediction_path)
-            array_shape = prediction_array.shape
-            array_dtype = str(prediction_array.dtype)
-            
-            logging.info(f"Serving prediction file: {filename}, shape: {array_shape}, dtype: {array_dtype}, size: {file_size} bytes")
-            
-        except Exception as e:
-            logging.error(f"Error validating numpy file: {e}")
-            return jsonify({"error": "Invalid or corrupted numpy file"}), 500
-        
-        # Create a safe filename for download
-        safe_filename = f"{job_id}_prediction.npy"
-        
-        def generate():
-            """Generator to stream the file in chunks"""
-            with open(prediction_path, 'rb') as f:
-                while True:
-                    chunk = f.read(8192)  # 8KB chunks
-                    if not chunk:
-                        break
-                    yield chunk
-        
-        # Create response with appropriate headers
-        response = Response(
-            generate(),
-            content_type='application/octet-stream',
-            headers={
-                'Content-Disposition': f'attachment; filename="{safe_filename}"',
-                'Content-Length': str(file_size),
-                'X-Array-Shape': str(array_shape),
-                'X-Array-Dtype': array_dtype
-            }
-        )
-        
-        logging.info(f"Prediction file download initiated for job {job_id}: {safe_filename}")
-        return response
-        
-    except Exception as e:
-        logging.error(f"Error downloading prediction file: {str(e)}")
-        return jsonify({"error": f"Failed to download prediction file: {str(e)}"}), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5002, debug=True)
