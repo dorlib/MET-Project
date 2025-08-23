@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import logging
 import numpy as np
 import matplotlib
@@ -11,6 +12,48 @@ from viz_utils import enhance_segmentation_mask, enhance_original_image, create_
 
 # Force matplotlib to use a non-GUI backend to avoid display issues
 matplotlib.use('Agg')
+
+# Load shared tissue colors configuration
+def load_tissue_colors():
+    """Load shared tissue color configuration"""
+    try:
+        config_path = '/app/tissue_colors.json'
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        # Convert to matplotlib-compatible format
+        tissue_colors = {}
+        tissue_names = {}
+        for class_id, info in config['tissue_colors'].items():
+            class_id = int(class_id)
+            # Convert RGBA to normalized values for matplotlib
+            rgba = info['rgba']
+            tissue_colors[class_id] = (rgba[0]/255, rgba[1]/255, rgba[2]/255, rgba[3])
+            tissue_names[class_id] = info['name']
+        
+        return tissue_colors, tissue_names, config['rendering_settings'], config['legend_settings']
+    except Exception as e:
+        logging.warning(f"Could not load shared tissue colors: {e}, using defaults")
+        # Fallback to default colors
+        return {
+            0: (0, 0, 0, 0),  # Transparent background
+            1: (34/255, 197/255, 94/255, 0.7),  # Green metastasis
+            2: (234/255, 179/255, 8/255, 0.5),  # Yellow edema
+            3: (59/255, 130/255, 246/255, 0.6)   # Blue enhancing tumor
+        }, {
+            0: "Background",
+            1: "Metastasis", 
+            2: "Edema",
+            3: "Enhancing Tumor"
+        }, {
+            "interpolation": "nearest",
+            "base_alpha": 0.5,
+            "background_color": "#1a1a1a"
+        }, {
+            "position": "upper right",
+            "framealpha": 0.8,
+            "fontsize": 10
+        }
 
 def create_high_res_visualization(segmentation, original_image=None, slice_idx=None, tissue_colors=None, tissue_names=None, 
                                  upscale_factor=1.0, contrast_enhancement=True, edge_enhancement=True, view_type='axial'):
@@ -31,6 +74,18 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
     Returns:
         PIL Image object containing the visualization
     """
+    
+    # Load shared configuration if colors not provided
+    if tissue_colors is None or tissue_names is None:
+        shared_colors, shared_names, render_settings, legend_settings = load_tissue_colors()
+        if tissue_colors is None:
+            tissue_colors = shared_colors
+        if tissue_names is None:
+            tissue_names = shared_names
+    else:
+        # Load just the settings
+        _, _, render_settings, legend_settings = load_tissue_colors()
+    
     # Ensure 3D arrays
     if len(segmentation.shape) < 3:
         segmentation = segmentation.reshape(1, segmentation.shape[0], segmentation.shape[1])
@@ -270,33 +325,49 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
             logging.warning(f"Upsampling failed: {str(e)}, using original resolution")
     
     # Create a figure with the visualization at higher resolution
-    dpi = 300  # Higher DPI for better resolution (increased from 200)
+    dpi = render_settings.get('dpi', 300)  # Use shared DPI setting with higher default
+    upscale_factor = render_settings.get('upscale_factor', 2.0)
+    
+    # Apply upscaling if enabled for single view as well
+    if upscale_factor > 1.0 and render_settings.get('sharpen_segmentation', True):
+        try:
+            # Already upscaled above, just log it
+            logging.info(f"Single view using {upscale_factor}x upscaling - shape: {mask_slice.shape}")
+        except Exception as e:
+            logging.warning(f"Single view upscaling info: {str(e)}")
     
     # Calculate figure size based on image dimensions to maintain aspect ratio
     height, width = mask_slice.shape
     aspect_ratio = width / height
     
-    # Set a base size with higher values for better resolution
-    fig_height = max(14, height / 60)  # Larger size in inches (increased from 12, height/75)
+    # Set a base size with higher values for better resolution and readability
+    figure_scale = render_settings.get('figure_scale', 3.0)  # 3x larger 
+    fig_height = max(16, height / 30) * figure_scale  # Much larger size for single view
     fig_width = fig_height * aspect_ratio
     
     # Create the figure and plot
     fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=dpi)
     
-    # Show the original image as the background
-    ax.imshow(orig_slice, cmap='gray', alpha=1.0)
-    
-    # Overlay the segmentation with alpha
-    ax.imshow(colors)
+    # Show raw segmentation with viridis colormap (like in training file - NO background image)
+    if render_settings.get('use_raw_segmentation', False):
+        # Display ONLY the raw segmentation mask with viridis colormap, exactly like training file
+        colormap = render_settings.get('colormap', 'viridis')
+        ax.imshow(mask_slice, interpolation=render_settings.get('interpolation', 'nearest'), 
+                  cmap=colormap)
+    else:
+        # Original method with grayscale background + categorical overlay
+        ax.imshow(orig_slice, cmap='gray', alpha=1.0, interpolation=render_settings.get('interpolation', 'nearest'))
+        ax.imshow(colors, alpha=0.6, interpolation=render_settings.get('interpolation', 'bilinear'))
     
     # Remove all axes, ticks, and labels for a clean image
     ax.set_axis_off()
     plt.tight_layout(pad=0)
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
     
-    # Add title with slice information
-    view_info = f"{view_type.capitalize()} Slice {slice_idx}" if slice_idx is not None else f"Middle {view_type.capitalize()} Slice"
-    ax.set_title(f"Segmentation Overlay - {view_info}", fontsize=16, pad=10)
+    # Add title with slice information - or remove if configured
+    if legend_settings.get('show_title', True):
+        view_info = f"{view_type.capitalize()} Slice {slice_idx}" if slice_idx is not None else f"Middle {view_type.capitalize()} Slice"
+        ax.set_title(f"Segmentation Overlay - {view_info}", fontsize=16, pad=10)
     
     # Add legend with class information
     legend_handles = []
@@ -315,7 +386,14 @@ def create_high_res_visualization(segmentation, original_image=None, slice_idx=N
     
     # Only add legend if there are classes to show
     if legend_handles:
-        ax.legend(legend_handles, legend_labels, loc='lower right', fontsize=12)
+        legend_fontsize = legend_settings.get('fontsize', 24)
+        legend_pos = legend_settings.get('position', 'lower right')
+        bbox_anchor = legend_settings.get('bbox_to_anchor', [0.98, 0.02])
+        
+        ax.legend(legend_handles, legend_labels, 
+                 loc=legend_pos, fontsize=legend_fontsize, 
+                 markerscale=2.5, bbox_to_anchor=bbox_anchor,
+                 framealpha=0.9, borderaxespad=0, handletextpad=1.0)
     
     # Save the figure to a buffer
     buf = io.BytesIO()
@@ -365,13 +443,17 @@ def create_side_by_side_visualization(segmentation, original_image=None, slice_i
     logging.info(f"Segmentation shape: {segmentation.shape}, unique values: {np.unique(segmentation)}")
     if original_image is not None:
         logging.info(f"Original image shape: {original_image.shape}")
-        
-    if tissue_colors is None:
-        tissue_colors = {
-            1: (1.0, 0.0, 0.0),    # Red for metastasis (class 1 in simplified model)
-            2: (0.0, 1.0, 0.0),    # Green for edema (class 2 in simplified model)
-            3: (0.0, 0.0, 1.0)     # Blue for tumor core (not used in simplified model)
-        }
+    
+    # Load shared color configuration if not provided
+    if tissue_colors is None or tissue_names is None:
+        default_tissue_colors, default_tissue_names, render_settings, legend_settings = load_tissue_colors()
+        if tissue_colors is None:
+            tissue_colors = default_tissue_colors
+        if tissue_names is None:
+            tissue_names = default_tissue_names
+    else:
+        # Still load render settings even if colors are provided
+        _, _, render_settings, legend_settings = load_tissue_colors()
     
     # Get segmentation data in the right orientation based on view_type
     if view_type == 'axial':
@@ -489,33 +571,92 @@ def create_side_by_side_visualization(segmentation, original_image=None, slice_i
                 orig_slice = (orig_slice - orig_slice.min()) / (orig_slice.max() - orig_slice.min())
     
     # Create a figure with the visualization at higher resolution
-    dpi = 200
+    dpi = render_settings.get('dpi', 200)
+    upscale_factor = render_settings.get('upscale_factor', 2.0)
+    
+    # Apply upscaling for sharper visualization if enabled
+    if upscale_factor > 1.0 and render_settings.get('sharpen_segmentation', True):
+        try:
+            # Upsample the segmentation mask using nearest neighbor to preserve class labels
+            mask_slice_upsampled = zoom(mask_slice, upscale_factor, order=0)
+            
+            if original_image is not None and orig_slice is not None:
+                # Upsample the original image using cubic interpolation for smoother results
+                orig_slice_upsampled = zoom(orig_slice, upscale_factor, order=3)
+                orig_slice = orig_slice_upsampled
+                
+            # Replace with upsampled mask
+            mask_slice = mask_slice_upsampled
+            
+            # Recreate colors array at new dimensions
+            colors = np.zeros((*mask_slice.shape, 4))
+            
+            # Reapply colors to the upsampled mask
+            for class_id, color in tissue_colors.items():
+                mask = mask_slice == class_id
+                if np.any(mask):
+                    colors[mask] = (*color, 1.0)  # RGB + alpha
+                    
+            logging.info(f"Applied {upscale_factor}x upscaling - new shape: {mask_slice.shape}")
+            
+        except Exception as e:
+            logging.warning(f"Upscaling failed, using original resolution: {str(e)}")
     
     # Calculate figure size based on image dimensions to maintain aspect ratio
     height, width = mask_slice.shape
     aspect_ratio = width / height
     
-    # Double the width to fit both images side by side
-    fig_height = max(8, height / 75)
+    # Use much larger figure sizes for better readability
+    figure_scale = render_settings.get('figure_scale', 3.0)  # 3x larger than before
+    fig_height = max(12, height / 30) * figure_scale  # Much larger base size
     fig_width = fig_height * aspect_ratio * 2.1  # *2 for side-by-side, extra 0.1 for spacing
     
-    # Create the figure and subplots
+    # Create the figure and subplots  
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(fig_width, fig_height), dpi=dpi)
     
-    # Show the original image on the left
+    # Show the original image on the left (grayscale)
     if original_image is not None and orig_slice is not None:
-        ax1.imshow(orig_slice, cmap='gray')
+        ax1.imshow(orig_slice, cmap='gray', interpolation=render_settings.get('interpolation', 'bilinear'))
     else:
-        ax1.imshow(np.zeros_like(mask_slice), cmap='gray')
+        ax1.imshow(np.zeros_like(mask_slice), cmap='gray', interpolation=render_settings.get('interpolation', 'bilinear'))
         
-    ax1.set_title(f"Original Image - {view_type.capitalize()} Slice {slice_idx}")
+    ax1.set_title(f"Original Image - {view_type.capitalize()} Slice {slice_idx}", fontsize=render_settings.get('font_size', 16))
+    
+    # Remove title if configured
+    if not legend_settings.get('show_title', True):
+        ax1.set_title("")
     ax1.set_axis_off()
     
-    # Show the segmentation on the right
-    if np.any(colors):
-        ax2.imshow(colors)
+    # Show combined visualization on the right 
+    # Show raw segmentation with viridis colormap (like in training file - NO background image)
+    if render_settings.get('use_raw_segmentation', False):
+        # Display ONLY the raw segmentation mask with viridis colormap, exactly like training file
+        colormap = render_settings.get('colormap', 'viridis')
+        ax2.imshow(mask_slice, interpolation=render_settings.get('interpolation', 'nearest'), 
+                  cmap=colormap)
+        ax2.set_title(f"Segmentation - {view_type.capitalize()} Slice {slice_idx}", fontsize=render_settings.get('font_size', 16))
         
-        # Add legend to second axis
+        # Remove title if configured
+        if not legend_settings.get('show_title', True):
+            ax2.set_title("")
+    else:
+        # Original method with grayscale background + categorical overlay
+        if original_image is not None and orig_slice is not None:
+            ax2.imshow(orig_slice, cmap='gray', interpolation=render_settings.get('interpolation', 'nearest'))
+        else:
+            ax2.imshow(np.zeros_like(mask_slice), cmap='gray', interpolation=render_settings.get('interpolation', 'nearest'))
+        
+        # Original categorical color overlay method
+        if np.any(colors):
+            ax2.imshow(colors, interpolation=render_settings.get('interpolation', 'bilinear'), 
+                      alpha=render_settings.get('base_alpha', 0.5))
+        ax2.set_title(f"Combined - {view_type.capitalize()} Slice {slice_idx}", fontsize=render_settings.get('font_size', 16))
+        
+        # Remove title if configured
+        if not legend_settings.get('show_title', True):
+            ax2.set_title("")
+        
+        # Add legend with class toggles (style)
         legend_handles = []
         legend_labels = []
         
@@ -525,18 +666,27 @@ def create_side_by_side_visualization(segmentation, original_image=None, slice_i
         # Only show legend entries for classes that are visible in the slice
         for class_id in present_classes:
             if class_id in tissue_colors and class_id != 0:  # Skip background
-                color_patch = plt.Rectangle((0, 0), 1, 1, fc=tissue_colors[class_id])
+                # Use the exact color from the LUT
+                color_rgba = tissue_colors[class_id]
+                color_patch = plt.Rectangle((0, 0), 1, 1, fc=color_rgba[:3], alpha=color_rgba[3])
                 legend_handles.append(color_patch)
                 name = tissue_names.get(class_id, f"Class {class_id}") if tissue_names else f"Class {class_id}"
                 legend_labels.append(name)
         
         # Only add legend if there are classes to show
         if legend_handles:
-            ax2.legend(legend_handles, legend_labels, loc='lower right', fontsize=10)
-    else:
-        ax2.imshow(np.zeros_like(mask_slice), cmap='gray')
+            legend_pos = legend_settings.get('position', 'lower right')
+            legend_alpha = legend_settings.get('framealpha', 0.9)
+            legend_fontsize = legend_settings.get('fontsize', 24)
+            legend_markersize = legend_settings.get('markersize', 20)
+            bbox_anchor = legend_settings.get('bbox_to_anchor', [0.98, 0.02])
+            
+            ax2.legend(legend_handles, legend_labels, 
+                      loc=legend_pos, framealpha=legend_alpha, fontsize=legend_fontsize,
+                      markerscale=2.0, bbox_to_anchor=bbox_anchor, 
+                      borderaxespad=0, handletextpad=1.0)
     
-    ax2.set_title(f"Segmentation - {view_type.capitalize()} Slice {slice_idx}")
+    ax2.set_title(f"Overlay - {view_type.capitalize()} Slice {slice_idx}")
     ax2.set_axis_off()
     
     plt.tight_layout(pad=1.0)

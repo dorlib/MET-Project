@@ -21,8 +21,9 @@ import {
 } from '@mui/material';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend } from 'chart.js';
-import Visualization3DPlaceholder from './Visualization3DPlaceholder';
+import VolumetricVisualization3D from './VolumetricVisualization3D';
 import VisualizationControls from './VisualizationControls';
+import ColorbarOverlay from './ColorbarOverlay';
 import { PictureAsPdf, TableChart } from '@mui/icons-material';
 import api from '../services/api';
 
@@ -32,6 +33,8 @@ ChartJS.register(ArcElement, ChartTooltip, Legend);
 const ResultViewer = ({ jobId, status, results }) => {
   const [tabValue, setTabValue] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [metastases3D, setMetastases3D] = useState([]);
+  const [loading3D, setLoading3D] = useState(false);
   
   // Visualization settings
   const [vizType, setVizType] = useState('slice');
@@ -227,6 +230,30 @@ const ResultViewer = ({ jobId, status, results }) => {
       console.log("Results contains segmentation_path:", results.segmentation_path ? "Yes" : "No");
     }
   }, [results]);
+
+  // Fetch real 3D metastases data when component loads
+  useEffect(() => {
+    const fetch3DData = async () => {
+      if (status === 'completed' && jobId && results?.metastasis_count > 0) {
+        setLoading3D(true);
+        try {
+          const response = await api.getMetastases3D(jobId);
+          console.log('3D metastases data:', response.data);
+          setMetastases3D(response.data.metastases || []);
+        } catch (error) {
+          console.error('Failed to fetch 3D metastases data:', error);
+          setMetastases3D([]);
+        } finally {
+          setLoading3D(false);
+        }
+      } else if (results?.metastasis_count === 0) {
+        // Clear 3D data for scans with no metastases
+        setMetastases3D([]);
+      }
+    };
+    
+    fetch3DData();
+  }, [jobId, status, results?.metastasis_count]);
 
   // Note: sliceInitialized state is now declared at the top of the component
   
@@ -558,7 +585,10 @@ const ResultViewer = ({ jobId, status, results }) => {
       </Tabs>
       
       {tabValue === 0 && (
-        <Visualization3DPlaceholder jobId={jobId} />
+        <VolumetricVisualization3D 
+          jobId={jobId} 
+          result={results}
+        />
       )}
       
       {tabValue === 1 && (
@@ -720,6 +750,16 @@ const ResultViewer = ({ jobId, status, results }) => {
             >
               Job ID: {jobId.slice(0,8)}...
             </Typography>
+
+            {/* Custom enlarged colorbar overlay */}
+            <ColorbarOverlay 
+              tissueClasses={[
+                { id: 0, name: 'Background', color: '#440154', value: 0 },
+                { id: 1, name: 'Class 1', color: '#31688e', value: 1 },
+                { id: 2, name: 'Edema', color: '#35b779', value: 2 },
+                { id: 3, name: 'Metastasis', color: '#fde725', value: 3 }
+              ]}
+            />
           </Box>
         </Box>
       )}

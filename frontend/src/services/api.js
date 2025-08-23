@@ -448,6 +448,21 @@ const apiService = {
     
     return `/three-plane-visualization/${jobId}?${queryString}`;
   },
+  
+  // Get real 3D metastases data with actual positions from segmentation
+  getMetastases3D: (jobId) => {
+    return api.get(`/metastases-3d/${jobId}`);
+  },
+
+  // Get 3D brain volume data with actual brain shape from all slices
+  getBrainVolume3D: (jobId) => {
+    return api.get(`/brain-volume-3d/${jobId}`);
+  },
+
+  // Get real volumetric 3D data with original brain scan slices
+  getVolumetric3D: (jobId) => {
+    return api.get(`/volumetric-3d/${jobId}`);
+  },
 };
 
 export default apiService;

@@ -351,22 +351,39 @@ async def status_endpoint(job_id: str):
     """
     Endpoint to check the status of a prediction job
     """
-    if job_id not in job_registry:
+    # First check in-memory registry
+    if job_id in job_registry:
+        job = job_registry[job_id]
         return JSONResponse({
             "job_id": job_id,
-            "status": "not_found",
-            "message": "Job ID not found"
-        }, status_code=404)
+            "status": job.status,
+            "message": job.message,
+            "start_time": job.start_time,
+            "end_time": job.end_time,
+            "processing_time": job.end_time - job.start_time if job.end_time else None
+        })
     
-    job = job_registry[job_id]
+    # If not in registry, check if result files exist on disk (for cases after container restart)
+    prediction_file = os.path.join(RESULTS_DIR, f"{job_id}_prediction.npy")
+    probabilities_file = os.path.join(RESULTS_DIR, f"{job_id}_probabilities.npy")
+    
+    if os.path.exists(prediction_file) and os.path.exists(probabilities_file):
+        # Files exist, so the job was completed successfully
+        return JSONResponse({
+            "job_id": job_id,
+            "status": "completed",
+            "message": "Job completed (recovered from disk)",
+            "start_time": None,
+            "end_time": None,
+            "processing_time": None
+        })
+    
+    # Job not found anywhere
     return JSONResponse({
         "job_id": job_id,
-        "status": job.status,
-        "message": job.message,
-        "start_time": job.start_time,
-        "end_time": job.end_time,
-        "processing_time": job.end_time - job.start_time if job.end_time else None
-    })
+        "status": "not_found",
+        "message": "Job ID not found"
+    }, status_code=404)
 
 @app.get("/health")
 async def health_check():

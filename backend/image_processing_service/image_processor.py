@@ -17,11 +17,25 @@ import nibabel as nib
 from scipy.ndimage import zoom
 import cv2
 import matplotlib
-# Import our high-resolution visualization modules
-from high_res_viz import create_high_res_visualization, generate_high_res_multi_slice_view
-# Import fixed visualization functions for side-by-side viewing
-from fixed_high_res_viz import create_side_by_side_visualization, create_side_by_side_three_plane_visualization
 matplotlib.use('Agg')  # Use non-interactive backend for matplotlib
+
+# Set matplotlib global parameters for larger, more readable visualizations
+matplotlib.rcParams.update({
+    'font.size': 24,           # Default font size
+    'axes.labelsize': 26,      # Axis labels
+    'axes.titlesize': 28,      # Title
+    'xtick.labelsize': 24,     # X-axis tick labels
+    'ytick.labelsize': 24,     # Y-axis tick labels
+    'legend.fontsize': 24,     # Legend
+    'figure.titlesize': 30,    # Figure title
+    'lines.linewidth': 3,      # Line width
+    'lines.markersize': 10,    # Marker size
+})
+
+# Import our high-resolution visualization modules
+from fixed_high_res_viz import create_high_res_visualization, generate_high_res_multi_slice_view
+# Import fixed visualization functions for side-by-side viewing  
+from fixed_high_res_viz import create_side_by_side_visualization, create_side_by_side_three_plane_visualization
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -31,16 +45,43 @@ METASTASIS_CLASS = 3  # Class 3 is for metastasis/tumor core in the model output
 EDEMA_CLASS = 2       # Class 2 is for edema
 TUMOR_CORE_CLASS = 3  # Class 3 is for tumor core (same as metastasis)
 VOXEL_VOLUME_MM3 = 1.0  # Default voxel volume in mm³ (can be adjusted based on scan parameters)
-TISSUE_COLORS = {
-    METASTASIS_CLASS: (1.0, 0.0, 0.0),       # Red for metastasis
-    EDEMA_CLASS: (0.0, 1.0, 0.0),            # Green for edema
-    TUMOR_CORE_CLASS: (0.0, 0.0, 1.0)        # Blue for tumor core
-}
-TISSUE_NAMES = {
-    METASTASIS_CLASS: "Metastasis",
-    EDEMA_CLASS: "Edema",
-    TUMOR_CORE_CLASS: "Tumor Core"
-}
+
+# Load shared tissue colors from configuration file
+def load_shared_tissue_colors():
+    """Load tissue colors from shared configuration"""
+    try:
+        config_path = '/app/tissue_colors.json'
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        tissue_colors = {}
+        tissue_names = {}
+        for class_id, info in config['tissue_colors'].items():
+            class_id = int(class_id)
+            # Convert RGBA to RGB for backward compatibility
+            rgba = info['rgba']
+            tissue_colors[class_id] = (rgba[0]/255, rgba[1]/255, rgba[2]/255)
+            tissue_names[class_id] = info['name']
+        
+        return tissue_colors, tissue_names, config
+    except Exception as e:
+        logging.warning(f"Could not load shared tissue colors: {e}, using defaults")
+        # Fallback to defaults
+        default_config = {
+            'legend_settings': {'fontsize': 24, 'markersize': 20, 'show_title': False}
+        }
+        return {
+            1: (34/255, 197/255, 94/255),   # Green for metastasis
+            2: (234/255, 179/255, 8/255),   # Yellow for edema  
+            3: (59/255, 130/255, 246/255)   # Blue for tumor core
+        }, {
+            1: "Metastasis",
+            2: "Edema", 
+            3: "Tumor Core"
+        }, default_config
+
+# Load the shared colors and config
+TISSUE_COLORS, TISSUE_NAMES, SHARED_CONFIG = load_shared_tissue_colors()
 
 # Enhanced utility functions for visualization and analysis
 def load_volume_data(file_path):
@@ -126,20 +167,44 @@ def create_colormap_visualization(segmentation, original_image=None, slice_idx=N
     height, width = mask_slice.shape
     aspect_ratio = width / height
     
-    # Set a minimum size to ensure good quality
-    fig_height = max(12, height / 100)  # Reasonable size in inches
+    # Set a minimum size to ensure good quality and readability 
+    fig_height = max(15, height / 50) * 2.5  # Much larger size for readability
     fig_width = fig_height * aspect_ratio
     
     plt.figure(figsize=(fig_width, fig_height), dpi=dpi)
     
-    # Plot the original image as grayscale
-    plt.imshow(orig_slice, cmap='gray', interpolation='nearest')
+    # Show ONLY the raw segmentation with viridis colormap (like training file - no background)
+    im = plt.imshow(mask_slice, interpolation='nearest', cmap='viridis')
     
-    # Overlay the colormap visualization
-    plt.imshow(colors, alpha=0.7, interpolation='nearest')
+    # Add a colorbar with class labels using shared config - MUCH BIGGER SIZE
+    unique_classes = np.unique(mask_slice)
+    if len(unique_classes) > 1:
+        # Make colorbar MUCH larger: full height, much wider bar, closer to plot
+        cbar = plt.colorbar(im, shrink=1.0, aspect=8, pad=0.05, fraction=0.08)
+        
+        # Use EXTRA large font size from shared config for maximum readability
+        fontsize = SHARED_CONFIG.get('legend_settings', {}).get('fontsize', 32)  # Even larger default
+        cbar.ax.tick_params(labelsize=fontsize, width=3, length=10, pad=15)
+        
+        # Make the colorbar labels MUCH more prominent
+        cbar.ax.yaxis.set_tick_params(pad=15)  # Much more space between ticks and labels
+        
+        # Make the colorbar itself thicker
+        cbar.ax.tick_params(which='major', width=3, length=10)
+        cbar.ax.tick_params(which='minor', width=2, length=5)
+        
+        # Set custom labels for the colorbar based on the classes present
+        class_names = {0: "Background", 1: "Class 1", 2: "Edema", 3: "Metastasis"}
+        tick_positions = unique_classes
+        tick_labels = [class_names.get(cls, f"Class {cls}") for cls in unique_classes]
+        cbar.set_ticks(tick_positions)
+        cbar.set_ticklabels(tick_labels)
+        
+        # Make the colorbar title also large if needed
+        cbar.set_label('Tissue Type', fontsize=fontsize//2, rotation=270, labelpad=25)
     
-    # Improved title with slice information
-    plt.title(f"Segmentation Visualization (Slice {slice_idx}/{segmentation.shape[0]-1})", fontsize=14)
+    # Add title only if configured (default is no title)
+    # plt.title(f"Segmentation Visualization (Slice {slice_idx}/{segmentation.shape[0]-1})", fontsize=18)
     plt.axis('off')  # Hide axes
     
     # Reduce padding to maximize image size
@@ -681,6 +746,318 @@ def analyze_segmentation(job_id):
         logging.error(f"Error analyzing segmentation for job {job_id}: {str(e)}")
         return jsonify({
             "error": f"Analysis failed: {str(e)}",
+            "job_id": job_id
+        }), 500
+
+
+@app.route('/metastases-3d/<job_id>', methods=['GET'])
+def get_metastases_3d(job_id):
+    """
+    Get real 3D positions and volumes of metastases from segmentation mask
+    """
+    logging.info(f"DEBUG: get_metastases_3d called with job_id: {job_id}")
+    
+    if not job_id:
+        return jsonify({"error": "Missing job ID"}), 400
+        
+    # Validate job_id format
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+    
+    pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+    logging.info(f"DEBUG: Looking for prediction file at: {pred_path}")
+    
+    if not os.path.exists(pred_path):
+        return jsonify({"error": "Segmentation not found", "job_id": job_id}), 404
+    
+    try:
+        # Load segmentation
+        segmentation = np.load(pred_path)
+        logging.info(f"DEBUG: Segmentation loaded for 3D analysis. Shape: {segmentation.shape}")
+        
+        # Extract metastasis mask
+        met_mask = (segmentation == METASTASIS_CLASS).astype(np.int32)
+        
+        if not np.any(met_mask):
+            return jsonify({
+                "job_id": job_id,
+                "metastases": [],
+                "count": 0,
+                "message": "No metastases detected"
+            })
+        
+        # Use connected components to identify individual metastases
+        labeled_mask, analysis_results = analyze_connected_components(
+            segmentation, METASTASIS_CLASS, VOXEL_VOLUME_MM3
+        )
+        
+        if analysis_results["count"] == 0:
+            return jsonify({
+                "job_id": job_id,
+                "metastases": [],
+                "count": 0,
+                "message": "No metastases detected"
+            })
+        
+        # Convert to format suitable for 3D visualization
+        metastases_3d = []
+        for region in analysis_results["regions"]:
+            # Normalize coordinates to [-1, 1] range for 3D rendering
+            # Assuming typical brain MRI dimensions
+            normalized_position = [
+                (region["centroid"][0] / segmentation.shape[0] - 0.5) * 2,  # X
+                (region["centroid"][1] / segmentation.shape[1] - 0.5) * 2,  # Y  
+                (region["centroid"][2] / segmentation.shape[2] - 0.5) * 2   # Z
+            ]
+            
+            metastases_3d.append({
+                "id": region["id"],
+                "position": normalized_position,
+                "volume": region["volume_mm3"],
+                "voxel_count": region["voxel_count"],
+                "centroid_voxels": region["centroid"]  # Original voxel coordinates
+            })
+        
+        logging.info(f"DEBUG: Found {len(metastases_3d)} metastases for 3D visualization")
+        
+        return jsonify({
+            "job_id": job_id,
+            "metastases": metastases_3d,
+            "count": len(metastases_3d),
+            "total_volume": analysis_results["total_volume"],
+            "segmentation_shape": segmentation.shape
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting 3D metastases for job {job_id}: {str(e)}")
+        return jsonify({
+            "error": f"3D analysis failed: {str(e)}",
+            "job_id": job_id
+        }), 500
+
+
+@app.route('/brain-volume-3d/<job_id>', methods=['GET'])
+def get_brain_volume_3d(job_id):
+    """
+    Get 3D brain volume data with actual brain shape and metastases from all slices
+    """
+    logging.info(f"DEBUG: get_brain_volume_3d called with job_id: {job_id}")
+    
+    if not job_id:
+        return jsonify({"error": "Missing job ID"}), 400
+        
+    # Validate job_id format
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+    
+    # Find both the original image and prediction
+    pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+    orig_path = os.path.join(RESULTS_FOLDER, f"{job_id}_original.npy")
+    
+    if not os.path.exists(pred_path):
+        return jsonify({"error": "Segmentation not found", "job_id": job_id}), 404
+    
+    try:
+        # Load segmentation
+        segmentation = np.load(pred_path)
+        logging.info(f"DEBUG: Segmentation loaded for brain volume. Shape: {segmentation.shape}")
+        
+        # Try to load original image for brain outline
+        brain_mask = None
+        if os.path.exists(orig_path):
+            try:
+                original = np.load(orig_path)
+                # Create brain mask from original image (non-zero areas)
+                brain_mask = (original > 0).astype(np.uint8)
+                logging.info(f"DEBUG: Original image loaded for brain mask. Shape: {original.shape}")
+            except Exception as e:
+                logging.warning(f"Could not load original image: {str(e)}")
+        
+        # If no original image, create brain mask from segmentation
+        if brain_mask is None:
+            # Any class > 0 indicates brain tissue
+            brain_mask = (segmentation > 0).astype(np.uint8)
+        
+        # Sample points from the brain volume for 3D rendering
+        # Downsample for performance - take every 4th voxel
+        sample_step = 4
+        brain_points = []
+        metastases_points = []
+        
+        z_indices, y_indices, x_indices = np.where(brain_mask[::sample_step, ::sample_step, ::sample_step])
+        
+        # Scale back to original coordinates
+        z_indices = z_indices * sample_step
+        y_indices = y_indices * sample_step  
+        x_indices = x_indices * sample_step
+        
+        # Convert to normalized coordinates [-1, 1]
+        z_norm = (z_indices / segmentation.shape[0] - 0.5) * 2
+        y_norm = (y_indices / segmentation.shape[1] - 0.5) * 2
+        x_norm = (x_indices / segmentation.shape[2] - 0.5) * 2
+        
+        # Sample brain surface points (not all interior points)
+        brain_surface_points = []
+        for i in range(0, len(z_indices), 10):  # Take every 10th point for surface
+            brain_surface_points.append({
+                "position": [float(x_norm[i]), float(y_norm[i]), float(z_norm[i])],
+                "intensity": 0.3
+            })
+        
+        # Get metastases with higher resolution
+        met_mask = (segmentation == METASTASIS_CLASS)
+        if np.any(met_mask):
+            # Get connected components for metastases
+            labeled_mask, analysis_results = analyze_connected_components(
+                segmentation, METASTASIS_CLASS, VOXEL_VOLUME_MM3
+            )
+            
+            metastases_3d = []
+            for region in analysis_results.get("regions", []):
+                # Use actual centroid positions
+                z, y, x = region["centroid"]
+                
+                # Normalize coordinates
+                z_norm = (z / segmentation.shape[0] - 0.5) * 2
+                y_norm = (y / segmentation.shape[1] - 0.5) * 2  
+                x_norm = (x / segmentation.shape[2] - 0.5) * 2
+                
+                metastases_3d.append({
+                    "id": region["id"],
+                    "position": [float(x_norm), float(y_norm), float(z_norm)],
+                    "volume": region["volume_mm3"],
+                    "voxel_count": region["voxel_count"],
+                    "centroid_voxels": region["centroid"]
+                })
+        else:
+            metastases_3d = []
+        
+        # Return comprehensive 3D data
+        result = {
+            "job_id": job_id,
+            "brain_surface_points": brain_surface_points[:1000],  # Limit for performance
+            "metastases": metastases_3d,
+            "segmentation_shape": segmentation.shape,
+            "has_brain_mask": brain_mask is not None,
+            "brain_points_count": len(brain_surface_points),
+            "metastases_count": len(metastases_3d)
+        }
+        
+        logging.info(f"DEBUG: Brain volume 3D data prepared - {len(brain_surface_points)} brain points, {len(metastases_3d)} metastases")
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error getting brain volume 3D for job {job_id}: {str(e)}")
+        return jsonify({
+            "error": f"Brain volume 3D failed: {str(e)}",
+            "job_id": job_id
+        }), 500
+
+@app.route('/volumetric-3d/<job_id>', methods=['GET'])
+def get_volumetric_3d(job_id):
+    """
+    Get real volumetric 3D data from original brain scan and segmentation
+    Returns downsampled volume slices for 3D visualization
+    """
+    logging.info(f"DEBUG: get_volumetric_3d called with job_id: {job_id}")
+    
+    if not job_id:
+        return jsonify({"error": "Missing job ID"}), 400
+        
+    # Validate job_id format
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+    
+    pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+    orig_path = os.path.join(RESULTS_FOLDER, f"{job_id}_original.npy")
+    
+    if not os.path.exists(pred_path):
+        return jsonify({"error": "Segmentation not found", "job_id": job_id}), 404
+    
+    try:
+        # Load segmentation
+        segmentation = np.load(pred_path)
+        logging.info(f"DEBUG: Segmentation loaded. Shape: {segmentation.shape}")
+        
+        # Load original brain scan if available
+        original_image = None
+        if os.path.exists(orig_path):
+            original_image = np.load(orig_path)
+            logging.info(f"DEBUG: Original image loaded. Shape: {original_image.shape}")
+        
+        # Downsample for 3D visualization (every 4th slice)
+        downsample_factor = 4
+        downsampled_indices = list(range(0, segmentation.shape[0], downsample_factor))
+        
+        # Extract volumetric slices
+        volume_slices = []
+        for i, slice_idx in enumerate(downsampled_indices[:20]):  # Limit to 20 slices
+            # Get brain slice
+            brain_slice = None
+            if original_image is not None:
+                brain_slice = original_image[slice_idx, :, :].astype(np.float32)
+                # Normalize to 0-1
+                brain_min, brain_max = brain_slice.min(), brain_slice.max()
+                if brain_max > brain_min:
+                    brain_slice = (brain_slice - brain_min) / (brain_max - brain_min)
+                
+                # Further downsample spatial dimensions for performance
+                brain_slice = brain_slice[::2, ::2]  # 2x spatial downsample
+            
+            # Get segmentation slice
+            seg_slice = segmentation[slice_idx, :, :].astype(np.uint8)
+            seg_slice = seg_slice[::2, ::2]  # 2x spatial downsample to match brain
+            
+            volume_slices.append({
+                "slice_index": slice_idx,
+                "z_position": slice_idx / segmentation.shape[0],  # Normalized Z position
+                "brain_data": brain_slice.tolist() if brain_slice is not None else None,
+                "segmentation_data": seg_slice.tolist(),
+                "shape": brain_slice.shape if brain_slice is not None else seg_slice.shape
+            })
+        
+        # Get metastases for overlay
+        metastases_3d = []
+        met_mask = (segmentation == METASTASIS_CLASS)
+        if np.any(met_mask):
+            labeled_mask, analysis_results = analyze_connected_components(
+                segmentation, METASTASIS_CLASS, VOXEL_VOLUME_MM3
+            )
+            
+            for region in analysis_results.get("regions", []):
+                z, y, x = region["centroid"]
+                # Normalize coordinates to match volume slices
+                z_norm = z / segmentation.shape[0]
+                y_norm = y / segmentation.shape[1]
+                x_norm = x / segmentation.shape[2]
+                
+                metastases_3d.append({
+                    "id": region["id"],
+                    "position": [float(x_norm), float(y_norm), float(z_norm)],
+                    "volume": region["volume_mm3"],
+                    "voxel_count": region["voxel_count"]
+                })
+        
+        result = {
+            "job_id": job_id,
+            "volume_slices": volume_slices,
+            "metastases": metastases_3d,
+            "original_shape": segmentation.shape,
+            "downsample_factor": downsample_factor,
+            "has_brain_data": original_image is not None,
+            "slice_count": len(volume_slices),
+            "metastases_count": len(metastases_3d)
+        }
+        
+        logging.info(f"DEBUG: Volumetric 3D data prepared - {len(volume_slices)} slices, {len(metastases_3d)} metastases")
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error getting volumetric 3D for job {job_id}: {str(e)}")
+        return jsonify({
+            "error": f"Volumetric 3D failed: {str(e)}",
             "job_id": job_id
         }), 500
 

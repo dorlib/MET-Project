@@ -825,24 +825,36 @@ def export_csv(job_id):
         # Create CSV content
         import csv
         import io
+        from datetime import datetime
         
         output = io.StringIO()
         writer = csv.writer(output)
         
         # Write header
         writer.writerow(['Brain Metastasis Analysis Results'])
+        writer.writerow(['Report Generated', datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
         writer.writerow(['Job ID', job_id])
-        writer.writerow(['Total Metastasis Count', result_data.get('metastasis_count', 0)])
-        writer.writerow(['Total Volume (mm³)', result_data.get('total_volume', 0)])
-        writer.writerow([])  # Empty row
         
-        # Write individual metastases data
-        writer.writerow(['Metastasis #', 'Volume (mm³)', '% of Total'])
+        metastasis_count = result_data.get('metastasis_count', 0)
         total_volume = result_data.get('total_volume', 0)
         
-        for i, volume in enumerate(result_data.get('metastasis_volumes', [])):
-            percentage = (volume / total_volume * 100) if total_volume > 0 else 0
-            writer.writerow([i + 1, round(volume, 2), f"{round(percentage, 1)}%"])
+        writer.writerow(['Total Metastasis Count', metastasis_count])
+        writer.writerow(['Total Volume (mm³)', total_volume if total_volume > 0 else 'N/A'])
+        writer.writerow([])  # Empty row
+        
+        # Write individual metastases data only if any were found
+        if metastasis_count > 0:
+            writer.writerow(['Individual Metastasis Analysis'])
+            writer.writerow(['Metastasis #', 'Volume (mm³)', '% of Total'])
+            
+            for i, volume in enumerate(result_data.get('metastasis_volumes', [])):
+                percentage = (volume / total_volume * 100) if total_volume > 0 else 0
+                writer.writerow([i + 1, round(volume, 2), f"{round(percentage, 1)}%"])
+        else:
+            writer.writerow(['Analysis Result'])
+            writer.writerow(['Status', 'No metastases detected'])
+            writer.writerow(['Description', 'The AI model analyzed the entire scan and found no regions consistent with metastatic lesions'])
+            writer.writerow(['Note', 'Please consult with a medical professional for clinical interpretation'])
         
         # Create response
         output.seek(0)
@@ -894,6 +906,7 @@ def export_pdf(job_id):
         from reportlab.lib import colors
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
         from reportlab.lib.styles import getSampleStyleSheet
+        from datetime import datetime
         import io
         
         buffer = io.BytesIO()
@@ -907,11 +920,19 @@ def export_pdf(job_id):
         elements.append(title)
         elements.append(Spacer(1, 12))
         
+        # Report generation info
+        report_info = Paragraph(f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal'])
+        elements.append(report_info)
+        elements.append(Spacer(1, 12))
+        
         # Summary data
+        metastasis_count = result_data.get('metastasis_count', 0)
+        total_volume = result_data.get('total_volume', 0)
+        
         summary_data = [
             ["Job ID:", job_id],
-            ["Total Metastasis Count:", str(result_data.get('metastasis_count', 0))],
-            ["Total Volume (mm³):", str(round(result_data.get('total_volume', 0), 2))]
+            ["Total Metastasis Count:", str(metastasis_count)],
+            ["Total Volume (mm³):", str(round(total_volume, 2)) if total_volume > 0 else "N/A"]
         ]
         
         summary_table = Table(summary_data, colWidths=[120, 300])
@@ -924,27 +945,46 @@ def export_pdf(job_id):
         elements.append(summary_table)
         elements.append(Spacer(1, 24))
         
-        # Metastasis data
-        metastasis_title = Paragraph("Individual Metastasis Analysis", styles['Heading2'])
-        elements.append(metastasis_title)
-        elements.append(Spacer(1, 12))
-        
-        metastasis_data = [["Metastasis #", "Volume (mm³)", "% of Total"]]
-        total_volume = result_data.get('total_volume', 0)
-        
-        for i, volume in enumerate(result_data.get('metastasis_volumes', [])):
-            percentage = (volume / total_volume * 100) if total_volume > 0 else 0
-            metastasis_data.append([i + 1, round(volume, 2), f"{round(percentage, 1)}%"])
-        
-        metastasis_table = Table(metastasis_data, colWidths=[100, 100, 100])
-        metastasis_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('ALIGN', (1, 1), (2, -1), 'RIGHT'),
-        ]))
-        
-        elements.append(metastasis_table)
+        # Check if any metastases were found
+        if metastasis_count > 0:
+            # Metastasis data
+            metastasis_title = Paragraph("Individual Metastasis Analysis", styles['Heading2'])
+            elements.append(metastasis_title)
+            elements.append(Spacer(1, 12))
+            
+            metastasis_data = [["Metastasis #", "Volume (mm³)", "% of Total"]]
+            
+            for i, volume in enumerate(result_data.get('metastasis_volumes', [])):
+                percentage = (volume / total_volume * 100) if total_volume > 0 else 0
+                metastasis_data.append([i + 1, round(volume, 2), f"{round(percentage, 1)}%"])
+            
+            metastasis_table = Table(metastasis_data, colWidths=[100, 100, 100])
+            metastasis_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('ALIGN', (1, 1), (2, -1), 'RIGHT'),
+            ]))
+            
+            elements.append(metastasis_table)
+        else:
+            # No metastases found message
+            no_mets_title = Paragraph("Analysis Result", styles['Heading2'])
+            elements.append(no_mets_title)
+            elements.append(Spacer(1, 12))
+            
+            no_mets_message = Paragraph(
+                "No metastases were detected in this brain scan. The AI model has analyzed the entire scan and found no regions consistent with metastatic lesions.",
+                styles['Normal']
+            )
+            elements.append(no_mets_message)
+            elements.append(Spacer(1, 12))
+            
+            note = Paragraph(
+                "<b>Note:</b> This result indicates that no metastatic lesions were identified by the AI model. Please consult with a medical professional for clinical interpretation.",
+                styles['Normal']
+            )
+            elements.append(note)
         
         # Build PDF
         doc.build(elements)
@@ -1160,3 +1200,95 @@ def get_three_plane_visualization(job_id):
     except Exception as e:
         logging.error(f"Error generating three-plane visualization for job {job_id}: {str(e)}")
         return jsonify({"error": f"Visualization failed: {str(e)}"}), 500
+
+
+@app.route('/metastases-3d/<job_id>', methods=['GET'])
+def get_metastases_3d(job_id):
+    """
+    Get real 3D positions and volumes of metastases from segmentation mask
+    
+    Args:
+        job_id: Job ID for the scan
+        
+    Returns:
+        JSON with metastases data including real 3D positions and volumes
+    """
+    try:
+        logging.info(f"3D metastases request for job {job_id}")
+        
+        # Forward the request to the image processing service
+        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/metastases-3d/{job_id}")
+        
+        if response.status_code != 200:
+            logging.error(f"Image processing service returned error: {response.status_code}")
+            error_data = response.json() if response.headers.get('Content-Type') == 'application/json' else {"error": "3D analysis failed"}
+            return jsonify(error_data), response.status_code
+        
+        logging.info(f"3D metastases data successfully retrieved for job {job_id}")
+        
+        return jsonify(response.json())
+        
+    except Exception as e:
+        logging.error(f"Error getting 3D metastases for job {job_id}: {str(e)}")
+        return jsonify({"error": f"3D analysis failed: {str(e)}"}), 500
+
+
+@app.route('/brain-volume-3d/<job_id>', methods=['GET'])
+def get_brain_volume_3d(job_id):
+    """
+    Get 3D brain volume data with actual brain shape from all slices
+    
+    Args:
+        job_id: Job ID for the scan
+        
+    Returns:
+        JSON with brain surface points and metastases for proper 3D visualization
+    """
+    try:
+        logging.info(f"3D brain volume request for job {job_id}")
+        
+        # Forward the request to the image processing service
+        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/brain-volume-3d/{job_id}")
+        
+        if response.status_code != 200:
+            logging.error(f"Image processing service returned error: {response.status_code}")
+            error_data = response.json() if response.headers.get('Content-Type') == 'application/json' else {"error": "Brain volume 3D analysis failed"}
+            return jsonify(error_data), response.status_code
+        
+        logging.info(f"3D brain volume data successfully retrieved for job {job_id}")
+        
+        return jsonify(response.json())
+        
+    except Exception as e:
+        logging.error(f"Error getting 3D brain volume for job {job_id}: {str(e)}")
+        return jsonify({"error": f"Brain volume 3D analysis failed: {str(e)}"}), 500
+
+@app.route('/volumetric-3d/<job_id>', methods=['GET'])
+def get_volumetric_3d(job_id):
+    """
+    Get real volumetric 3D data from original brain scan and segmentation
+    
+    Args:
+        job_id: Job ID for the scan
+        
+    Returns:
+        JSON with downsampled volume slices for true 3D visualization
+    """
+    try:
+        logging.info(f"Volumetric 3D request for job {job_id}")
+        
+        # Forward the request to the image processing service
+        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/volumetric-3d/{job_id}")
+        
+        if response.status_code != 200:
+            logging.error(f"Image processing service returned error: {response.status_code}")
+            error_data = response.json() if response.headers.get('Content-Type') == 'application/json' else {"error": "Volumetric 3D analysis failed"}
+            return jsonify(error_data), response.status_code
+        
+        logging.info(f"Volumetric 3D data successfully retrieved for job {job_id}")
+        
+        return jsonify(response.json())
+        
+    except Exception as e:
+        logging.error(f"Error getting volumetric 3D for job {job_id}: {str(e)}")
+        return jsonify({"error": f"Volumetric 3D analysis failed: {str(e)}"}), 500

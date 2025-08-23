@@ -1,0 +1,47 @@
+{
+  "tissue_colors": {
+    "0": {
+      "name": "Background",
+      "color": "#00007f",
+      "rgba": [0, 0, 127, 0.0],
+      "alpha": 0.0
+    },
+    "1": {
+      "name": "Metastasis",
+      "color": "#00d4ff",
+      "rgba": [0, 212, 255, 0.5],
+      "alpha": 0.5
+    },
+    "2": {
+      "name": "Edema",
+      "color": "#ffe500",
+      "rgba": [255, 229, 0, 0.5],
+      "alpha": 0.5
+    },
+    "3": {
+      "name": "Enhancing Tumor",
+      "color": "#7f0000",
+      "rgba": [127, 0, 0, 0.5],
+      "alpha": 0.5
+    }
+  },
+  "rendering_settings": {
+    "interpolation": "nearest",
+    "base_alpha": 1.0,
+    "background_color": "#1a1a1a",
+    "grayscale_range": [0, 255],
+    "dpi": 150,
+    "upscale_factor": 1.0,
+    "enhance_edges": false,
+    "sharpen_segmentation": false,
+    "use_raw_segmentation": true,
+    "colormap": "viridis",
+    "figure_scale": 3.0,
+    "font_size": 16
+  },
+  "legend_settings": {
+    "position": "upper right",
+    "framealpha": 0.8,
+    "fontsize": 16
+  }
+}

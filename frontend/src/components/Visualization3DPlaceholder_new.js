@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { 
   Box, 
   Typography, 
@@ -10,9 +10,7 @@ import {
   Paper,
   Grid,
   LinearProgress,
-  Alert,
-  FormControlLabel,
-  Checkbox
+  Alert
 } from '@mui/material';
 import apiService from '../services/api';
 
@@ -28,9 +26,8 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
   const [brainData, setBrainData] = useState(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const [autoRotate, setAutoRotate] = useState(true);
 
-  // Load brain volume data (using existing metastases 3D endpoint for now)
+  // Load brain volume data
   useEffect(() => {
     if (!jobId) return;
 
@@ -39,24 +36,9 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
         setIsLoading(true);
         setError(null);
         
-        // Use the existing metastases 3D API
-        const response = await apiService.getMetastases3D(jobId);
-        console.log('3D data loaded:', response.data);
-        
-        // Create brain volume visualization data
-        const metastases = response.data.metastases || [];
-        const segmentationShape = response.data.segmentation_shape || [256, 256, 256];
-        
-        // Generate brain volume points from the actual segmentation shape
-        const brainVolume = generateBrainVolumeFromShape(segmentationShape);
-        
-        setBrainData({
-          metastases: metastases,
-          brain_volume_points: brainVolume,
-          segmentation_shape: segmentationShape,
-          metastases_count: metastases.length,
-          brain_points_count: brainVolume.length
-        });
+        const data = await apiService.getBrainVolume3D(jobId);
+        console.log('Brain volume data loaded:', data);
+        setBrainData(data);
       } catch (error) {
         console.error('Error loading brain volume data:', error);
         setError('Failed to load 3D brain data');
@@ -67,55 +49,6 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
 
     loadBrainData();
   }, [jobId]);
-
-  // Generate 3D brain volume points that look like real brain tissue
-  const generateBrainVolumeFromShape = (shape) => {
-    const points = [];
-    const [depth, height, width] = shape;
-    
-    // Create a realistic brain shape with multiple layers
-    const numPoints = 2000;
-    
-    for (let i = 0; i < numPoints; i++) {
-      // Create brain-like ellipsoid with realistic proportions
-      const theta = Math.random() * 2 * Math.PI;
-      const phi = Math.random() * Math.PI;
-      
-      // Brain proportions based on real anatomy
-      const radiusX = 0.85; // Wider
-      const radiusY = 1.0;  // Standard height
-      const radiusZ = 0.75; // Slightly compressed front-to-back
-      
-      // Create layers at different depths for volume effect
-      const layer = Math.floor(Math.random() * 5); // 5 different layers
-      const r = 0.3 + (layer * 0.15); // Different radii for layers
-      
-      const x = r * radiusX * Math.sin(phi) * Math.cos(theta);
-      const y = r * radiusY * Math.sin(phi) * Math.sin(theta);
-      const z = r * radiusZ * Math.cos(phi);
-      
-      // Add some randomness for realistic tissue texture
-      const noise = 0.05;
-      const finalX = x + (Math.random() - 0.5) * noise;
-      const finalY = y + (Math.random() - 0.5) * noise;
-      const finalZ = z + (Math.random() - 0.5) * noise;
-      
-      // Different brain tissue types
-      let tissueType = 'gray'; // Default gray matter
-      if (r < 0.5) tissueType = 'white'; // Inner white matter
-      if (r > 0.9) tissueType = 'cortex'; // Outer cortex
-      
-      points.push({
-        position: [finalX, finalY, finalZ],
-        intensity: 0.4 + Math.random() * 0.4,
-        layer: layer,
-        tissueType: tissueType,
-        size: 1 + Math.random() * 2
-      });
-    }
-    
-    return points;
-  };
 
   // Convert 3D coordinates to screen coordinates
   const project3DToScreen = (x, y, z, canvasWidth, canvasHeight) => {
@@ -147,74 +80,8 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
     return { x: screenX, y: screenY, z: depth, scale };
   };
 
-  // Render brain volume as layered 3D points
-  const renderBrainVolume = useCallback((ctx, brainPoints, canvasWidth, canvasHeight) => {
-    if (!brainPoints || brainPoints.length === 0) return;
-
-    // Project all points and sort by depth (back to front)
-    const projectedPoints = brainPoints.map(point => {
-      const projected = project3DToScreen(
-        point.position[0], 
-        point.position[1], 
-        point.position[2], 
-        canvasWidth, 
-        canvasHeight
-      );
-      return {
-        ...projected,
-        intensity: point.intensity,
-        tissueType: point.tissueType,
-        layer: point.layer,
-        size: point.size
-      };
-    }).sort((a, b) => a.z - b.z); // Back to front for proper depth
-
-    // Render brain volume points with tissue-specific colors
-    projectedPoints.forEach(point => {
-      if (point.x < 0 || point.x > canvasWidth || point.y < 0 || point.y > canvasHeight) return;
-      
-      // Depth-based transparency and size
-      const depthAlpha = Math.max(0.1, 1 - Math.abs(point.z) * 0.4);
-      const pointSize = Math.max(0.8, point.scale * point.size);
-      
-      // Tissue-specific colors for realistic brain appearance
-      let color;
-      switch (point.tissueType) {
-        case 'white':
-          color = `rgba(180, 180, 190, ${depthAlpha * opacity * 0.8})`;
-          break;
-        case 'cortex':
-          color = `rgba(120, 120, 130, ${depthAlpha * opacity * 0.9})`;
-          break;
-        case 'gray':
-        default:
-          const gray = Math.floor(90 + point.intensity * 80);
-          color = `rgba(${gray}, ${gray}, ${gray + 15}, ${depthAlpha * opacity * 0.7})`;
-          break;
-      }
-      
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, pointSize, 0, 2 * Math.PI);
-      ctx.fill();
-      
-      // Add subtle glow for depth effect
-      if (pointSize > 1.5) {
-        const glowSize = pointSize * 1.5;
-        const gradient = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, glowSize);
-        gradient.addColorStop(0, color);
-        gradient.addColorStop(1, 'rgba(100, 100, 110, 0)');
-        
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, glowSize, 0, 2 * Math.PI);
-        ctx.fill();
-      }
-    });
-  }, [project3DToScreen]);
-
   // Render brain surface as a point cloud with depth
-  const renderBrainSurface = useCallback((ctx, brainPoints, canvasWidth, canvasHeight) => {
+  const renderBrainSurface = (ctx, brainPoints, canvasWidth, canvasHeight) => {
     if (!brainPoints || brainPoints.length === 0) return;
 
     // Project all points and sort by depth
@@ -248,10 +115,10 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
       ctx.arc(point.x, point.y, pointSize, 0, 2 * Math.PI);
       ctx.fill();
     });
-  }, [opacity, rotation, zoom]);
+  };
 
   // Render metastases as bright red spheres
-  const renderMetastases = useCallback((ctx, metastases, canvasWidth, canvasHeight) => {
+  const renderMetastases = (ctx, metastases, canvasWidth, canvasHeight) => {
     if (!metastases || metastases.length === 0) return;
 
     // Project and sort metastases by depth
@@ -305,10 +172,10 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
       ctx.arc(met.x - size/3, met.y - size/3, size/3, 0, 2 * Math.PI);
       ctx.fill();
     });
-  }, [rotation, zoom]);
+  };
 
   // Main render function
-  const render = useCallback(() => {
+  const render = () => {
     const canvas = canvasRef.current;
     if (!canvas || !brainData) return;
 
@@ -340,12 +207,12 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
       ctx.stroke();
     }
 
-    // Render brain volume
-    if (brainData.brain_volume_points && viewType !== 'metastases-only') {
-      renderBrainVolume(ctx, brainData.brain_volume_points, canvasWidth, canvasHeight);
+    // Render brain surface
+    if (brainData.brain_surface_points && viewType !== 'metastases-only') {
+      renderBrainSurface(ctx, brainData.brain_surface_points, canvasWidth, canvasHeight);
     }
 
-    // Render metastases on top
+    // Render metastases
     if (brainData.metastases) {
       renderMetastases(ctx, brainData.metastases, canvasWidth, canvasHeight);
     }
@@ -369,7 +236,7 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
     ctx.moveTo(centerX, centerY - 30);
     ctx.lineTo(centerX, centerY + 30);
     ctx.stroke();
-  }, [brainData, viewType, renderBrainVolume, renderMetastases]);
+  };
 
   // Animation loop
   useEffect(() => {
@@ -387,12 +254,12 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [brainData, render]);
+  }, [brainData, viewType, opacity, rotation, zoom]);
 
   // Auto-rotation effect
   useEffect(() => {
-    const autoRotateFunction = () => {
-      if (!isDragging && autoRotate) {
+    const autoRotate = () => {
+      if (!isDragging) {
         setRotation(prev => ({
           x: prev.x,
           y: (prev.y + 0.5) % 360
@@ -400,9 +267,9 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
       }
     };
 
-    const interval = setInterval(autoRotateFunction, 50);
+    const interval = setInterval(autoRotate, 50);
     return () => clearInterval(interval);
-  }, [isDragging, autoRotate]);
+  }, [isDragging]);
 
   // Mouse interaction handlers
   const handleMouseDown = (e) => {
@@ -428,23 +295,11 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
     setIsDragging(false);
   };
 
-  const handleWheel = useCallback((e) => {
+  const handleWheel = (e) => {
     e.preventDefault();
     const delta = e.deltaY * -0.001;
     setZoom(prev => Math.max(0.5, Math.min(3.0, prev + delta)));
-  }, []);
-
-  // Setup wheel event listener with proper passive handling
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    canvas.addEventListener('wheel', handleWheel, { passive: false });
-    
-    return () => {
-      canvas.removeEventListener('wheel', handleWheel);
-    };
-  }, [handleWheel]);
+  };
 
   if (isLoading) {
     return (
@@ -486,7 +341,7 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
               label="View Type"
               onChange={(e) => setViewType(e.target.value)}
             >
-              <MenuItem value="surface">3D Brain Volume + Metastases</MenuItem>
+              <MenuItem value="surface">Brain Surface + Metastases</MenuItem>
               <MenuItem value="metastases-only">Metastases Only</MenuItem>
             </Select>
           </FormControl>
@@ -519,32 +374,12 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
         </Grid>
       </Grid>
 
-      <Grid container spacing={2} sx={{ mb: 2 }}>
-        <Grid item xs={12} sm={6}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={autoRotate}
-                onChange={(e) => setAutoRotate(e.target.checked)}
-                size="small"
-              />
-            }
-            label="Auto-rotate visualization"
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Drag to manually rotate, scroll to zoom
-          </Typography>
-        </Grid>
-      </Grid>
-
       {brainData && (
         <Box sx={{ mb: 2 }}>
           <Typography variant="body2" color="text.secondary">
-            Volume Shape: {brainData.segmentation_shape?.join('×')} | 
             Brain Points: {brainData.brain_points_count} | 
-            Metastases: {brainData.metastases_count}
+            Metastases: {brainData.metastases_count} | 
+            Volume Shape: {brainData.segmentation_shape?.join('×')}
           </Typography>
         </Box>
       )}
@@ -564,6 +399,7 @@ const Visualization3DPlaceholder = ({ jobId, result }) => {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
       >
         <canvas
           ref={canvasRef}
