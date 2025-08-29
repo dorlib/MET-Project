@@ -849,7 +849,7 @@ def export_csv(job_id):
             
             for i, volume in enumerate(result_data.get('metastasis_volumes', [])):
                 percentage = (volume / total_volume * 100) if total_volume > 0 else 0
-                writer.writerow([i + 1, round(volume, 2), f"{round(percentage, 1)}%"])
+                writer.writerow([i + 1, round(volume, 2), f"{round(percentage, 3)}%"])
         else:
             writer.writerow(['Analysis Result'])
             writer.writerow(['Status', 'No metastases detected'])
@@ -956,7 +956,7 @@ def export_pdf(job_id):
             
             for i, volume in enumerate(result_data.get('metastasis_volumes', [])):
                 percentage = (volume / total_volume * 100) if total_volume > 0 else 0
-                metastasis_data.append([i + 1, round(volume, 2), f"{round(percentage, 1)}%"])
+                metastasis_data.append([i + 1, round(volume, 2), f"{round(percentage, 3)}%"])
             
             metastasis_table = Table(metastasis_data, colWidths=[100, 100, 100])
             metastasis_table.setStyle(TableStyle([
