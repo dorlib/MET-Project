@@ -62,6 +62,8 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
 
       try {
         setLoading(true);
+        
+        // Fetch results from analysis endpoint
         const response = await api.getResults(jobId, true);
         if (response && response.data) {
           // Check if the status indicates job not found
@@ -74,7 +76,29 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
           setScanStatus(response.data.status);
         } else {
           setError('Failed to load scan details');
+          return;
         }
+        
+        // Also try to fetch patient name from user scans
+        try {
+          const userScansResponse = await api.getUserScans(1, 100); // Get up to 100 scans to find this one
+          if (userScansResponse.data && userScansResponse.data.scans) {
+            const matchingScan = userScansResponse.data.scans.find(scan => scan.job_id === jobId);
+            if (matchingScan && matchingScan.patient_name) {
+              // Update scan info with patient name from user service
+              setScanInfo(prevInfo => ({
+                ...prevInfo,
+                patient_name: matchingScan.patient_name,
+                file_name: matchingScan.file_name || prevInfo.file_name,
+                created_at: matchingScan.created_at || prevInfo.created_at
+              }));
+            }
+          }
+        } catch (userScanError) {
+          // Don't fail if we can't get user scans - just continue without patient name
+          console.log('Could not fetch patient name from user scans:', userScanError);
+        }
+        
       } catch (err) {
         console.error('Error fetching scan info:', err);
         
@@ -150,6 +174,9 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
           </Typography>
           <Typography variant="body2" sx={{ mb: 1 }}>
             <strong>Scan ID:</strong> {jobId}
+            {scanInfo?.patient_name && (
+              <> | <strong>Patient:</strong> {scanInfo.patient_name}</>
+            )}
           </Typography>
           <Typography variant="body2">
             You can try:
@@ -213,9 +240,25 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
             <Typography variant="h4" sx={{ fontWeight: 600, mb: 1 }}>
               Scan Analysis Details
             </Typography>
-            <Typography variant="h6" sx={{ opacity: 0.9 }}>
-              Job ID: {jobId}
-            </Typography>
+            {scanInfo?.patient_name ? (
+              <>
+                <Typography variant="h5" sx={{ opacity: 0.95, mb: 0.5, fontWeight: 500 }}>
+                  Patient: {scanInfo.patient_name}
+                </Typography>
+                <Typography variant="body1" sx={{ opacity: 0.8 }}>
+                  Job ID: {jobId}
+                </Typography>
+              </>
+            ) : (
+              <>
+                <Typography variant="h6" sx={{ opacity: 0.9, mb: 0.5 }}>
+                  No Patient Name Set
+                </Typography>
+                <Typography variant="body1" sx={{ opacity: 0.8 }}>
+                  Job ID: {jobId}
+                </Typography>
+              </>
+            )}
           </Box>
           <Box sx={{ textAlign: 'right' }}>
             {getStatusChip(scanStatus)}
@@ -384,6 +427,7 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
                 jobId={jobId} 
                 status={scanStatus} 
                 results={scanInfo}
+                hidePatientEdit={true}
               />
             </CardContent>
           </Card>

@@ -30,7 +30,8 @@ import {
   DialogContentText,
   DialogActions,
   IconButton,
-  Tooltip
+  Tooltip,
+  TextField
 } from '@mui/material';
 import { 
   PersonOutline, 
@@ -40,7 +41,12 @@ import {
   SecurityOutlined, 
   VerifiedUser,
   Delete,
-  Warning
+  Warning,
+  Edit,
+  Save,
+  Cancel,
+  Person,
+  Search
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -68,6 +74,15 @@ const UserProfile = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [scanToDelete, setScanToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  
+  // Patient name editing state
+  const [editingPatientName, setEditingPatientName] = useState(null);
+  const [patientNameValue, setPatientNameValue] = useState('');
+  const [updatingPatientName, setUpdatingPatientName] = useState(false);
+  
+  // Patient name search state
+  const [patientNameSearch, setPatientNameSearch] = useState('');
+  const [filteredScans, setFilteredScans] = useState([]);
 
   // Fetch user's scan history and 2FA status
   useEffect(() => {
@@ -120,6 +135,27 @@ const UserProfile = () => {
     fetchUserScans();
     fetchUserSettings();
   }, [page, rowsPerPage, filters]);
+
+  // Filter scans by patient name search
+  useEffect(() => {
+    if (!patientNameSearch.trim()) {
+      setFilteredScans(scans);
+    } else {
+      const searchTerm = patientNameSearch.toLowerCase();
+      const filtered = scans.filter(scan => {
+        if (!scan.patient_name) return false;
+        return scan.patient_name.toLowerCase().includes(searchTerm);
+      });
+      setFilteredScans(filtered);
+      // Reset to first page when search results change
+      setPage(0);
+    }
+  }, [scans, patientNameSearch]);
+
+  // Handle search input change
+  const handleSearchChange = (event) => {
+    setPatientNameSearch(event.target.value);
+  };
 
   // Format date for display
   const formatDate = (dateString) => {
@@ -219,6 +255,44 @@ const UserProfile = () => {
     setScanToDelete(null);
   };
 
+  // Handle edit patient name
+  const handleEditPatientName = (scan) => {
+    setEditingPatientName(scan.job_id);
+    setPatientNameValue(scan.patient_name || '');
+  };
+
+  // Handle save patient name
+  const handleSavePatientName = async (jobId) => {
+    setUpdatingPatientName(true);
+    try {
+      await api.updateScanPatientName(jobId, patientNameValue);
+      
+      // Update the scan in local state
+      setScans(prevScans => 
+        prevScans.map(scan => 
+          scan.job_id === jobId 
+            ? { ...scan, patient_name: patientNameValue }
+            : scan
+        )
+      );
+      
+      setEditingPatientName(null);
+      setPatientNameValue('');
+      setError(null);
+    } catch (err) {
+      console.error('Error updating patient name:', err);
+      setError('Failed to update patient name. Please try again.');
+    } finally {
+      setUpdatingPatientName(false);
+    }
+  };
+
+  // Handle cancel patient name edit
+  const handleCancelPatientName = () => {
+    setEditingPatientName(null);
+    setPatientNameValue('');
+  };
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Grid container spacing={4}>
@@ -306,6 +380,26 @@ const UserProfile = () => {
               
               <Divider sx={{ mb: 3 }} />
               
+              {/* Patient name search */}
+              <Box sx={{ mb: 3 }}>
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  placeholder="Search by patient name..."
+                  value={patientNameSearch}
+                  onChange={handleSearchChange}
+                  InputProps={{
+                    startAdornment: <Search color="disabled" sx={{ mr: 1 }} />
+                  }}
+                  sx={{ maxWidth: 400 }}
+                />
+                {patientNameSearch && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    {filteredScans.length} scan(s) found matching "{patientNameSearch}"
+                  </Typography>
+                )}
+              </Box>
+              
               {/* Scan filters */}
               <ScanFilter 
                 initialFilters={filters}
@@ -322,12 +416,17 @@ const UserProfile = () => {
                 <Alert severity="info">
                   No scan history found. Upload a scan to get started!
                 </Alert>
+              ) : filteredScans.length === 0 && patientNameSearch ? (
+                <Alert severity="info">
+                  No scans found matching "{patientNameSearch}". Try a different search term.
+                </Alert>
               ) : (
                 <TableContainer>
                   <Table>
                     <TableHead>
                       <TableRow>
                         <TableCell>Date</TableCell>
+                        <TableCell>Patient Name</TableCell>
                         <TableCell>File</TableCell>
                         <TableCell>Status</TableCell>
                         <TableCell align="right">Results</TableCell>
@@ -335,9 +434,55 @@ const UserProfile = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {scans.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((scan) => (
+                      {filteredScans.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((scan) => (
                         <TableRow key={scan.job_id}>
                           <TableCell>{formatDate(scan.created_at)}</TableCell>
+                          <TableCell>
+                            {editingPatientName === scan.job_id ? (
+                              <Box display="flex" alignItems="center" gap={1}>
+                                <TextField
+                                  size="small"
+                                  value={patientNameValue}
+                                  onChange={(e) => setPatientNameValue(e.target.value)}
+                                  placeholder="Enter patient name"
+                                  disabled={updatingPatientName}
+                                  sx={{ minWidth: '150px' }}
+                                />
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleSavePatientName(scan.job_id)}
+                                  disabled={updatingPatientName}
+                                  color="primary"
+                                >
+                                  {updatingPatientName ? <CircularProgress size={16} /> : <Save />}
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  onClick={handleCancelPatientName}
+                                  disabled={updatingPatientName}
+                                >
+                                  <Cancel />
+                                </IconButton>
+                              </Box>
+                            ) : (
+                              <Box display="flex" alignItems="center" gap={1}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  <Person fontSize="small" color="disabled" />
+                                  <Typography variant="body2">
+                                    {scan.patient_name || 'Not set'}
+                                  </Typography>
+                                </Box>
+                                <Tooltip title="Edit patient name">
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleEditPatientName(scan)}
+                                  >
+                                    <Edit fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              </Box>
+                            )}
+                          </TableCell>
                           <TableCell>{scan.file_name}</TableCell>
                           <TableCell>{getStatusChip(scan.status)}</TableCell>
                           <TableCell align="right">
@@ -377,7 +522,7 @@ const UserProfile = () => {
                     <TablePagination
                       rowsPerPageOptions={[5, 10, 25]}
                       component="div"
-                      count={scans.length}
+                      count={filteredScans.length}
                       rowsPerPage={rowsPerPage}
                       page={page}
                       onPageChange={(event, newPage) => setPage(newPage)}

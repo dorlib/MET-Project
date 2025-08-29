@@ -786,6 +786,31 @@ def delete_scan(scan_id):
         logging.error(f"Error deleting scan {scan_id}: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/user/scans/<scan_id>/patient', methods=['PUT'])
+@token_required
+def update_scan_patient_name(scan_id):
+    """
+    Update patient name for a specific scan
+    """
+    try:
+        # Forward to user service with token
+        auth_header = request.headers.get('Authorization')
+        
+        response = requests.put(
+            f"{USER_SERVICE_URL}/scans/{scan_id}/patient",
+            headers={
+                "Authorization": auth_header,
+                "Content-Type": "application/json"
+            },
+            json=request.json
+        )
+        
+        return response.json(), response.status_code
+            
+    except Exception as e:
+        logging.error(f"Error updating patient name for scan {scan_id}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 # 2FA endpoints have been removed
 
 @app.route('/export/csv/<job_id>', methods=['GET'])

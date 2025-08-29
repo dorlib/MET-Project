@@ -367,3 +367,52 @@ def delete_scan(job_id):
     except Exception as e:
         logger.error(f"Error in delete_scan: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
+
+@scan_bp.route('/scans/<job_id>/patient', methods=['PUT'])
+def update_scan_patient_name(job_id):
+    """Update patient name for a specific scan."""
+    try:
+        # Check for authentication header
+        auth_header = request.headers.get('Authorization')
+        
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Authentication required"}), 401
+            
+        token = auth_header.split(' ')[1]
+        payload = verify_token(token)
+        
+        if not payload:
+            return jsonify({"error": "Invalid authentication token"}), 401
+            
+        user_id = payload.get('user_id')
+        data = request.json
+        
+        if not data or 'patient_name' not in data:
+            return jsonify({"error": "Patient name is required"}), 400
+            
+        db = next(get_db())
+        
+        # First verify that the scan belongs to the user
+        scan_result = ScanService.get_scan_by_job_id(db, job_id, user_id)
+        if not scan_result["success"]:
+            return jsonify({"error": scan_result["error"]}), scan_result["status_code"]
+        
+        # Update the patient name
+        result = ScanService.update_scan(
+            db,
+            job_id,
+            None,  # status
+            None,  # metastasis_count
+            None,  # total_volume
+            None,  # metastasis_volumes
+            data['patient_name']  # patient_name
+        )
+        
+        if result["success"]:
+            return jsonify(result["data"]), result["status_code"]
+        else:
+            return jsonify({"error": result["error"]}), result["status_code"]
+            
+    except Exception as e:
+        logger.error(f"Error in update_scan_patient_name: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500

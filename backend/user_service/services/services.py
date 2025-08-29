@@ -101,7 +101,8 @@ class ScanService:
     def update_scan(db: Session, job_id: str, status: Optional[str] = None, 
                    metastasis_count: Optional[int] = None, 
                    total_volume: Optional[float] = None, 
-                   metastasis_volumes: Optional[List[float]] = None) -> Dict:
+                   metastasis_volumes: Optional[List[float]] = None,
+                   patient_name: Optional[str] = None) -> Dict:
         """
         Update a scan record
         """
@@ -116,6 +117,8 @@ class ScanService:
                 )
             elif status is not None:
                 scan = ScanRepository.update_scan_status(db, job_id, status)
+            elif patient_name is not None:
+                scan = ScanRepository.update_scan_patient_name(db, job_id, patient_name)
                 
             return {
                 "success": True,
@@ -252,7 +255,7 @@ class ScanService:
             
             # Add additional computed fields for the details view
             scan_data['processing_duration'] = None
-            if scan.created_at and scan.updated_at:
+            if scan.created_at and hasattr(scan, 'updated_at') and scan.updated_at:
                 duration = scan.updated_at - scan.created_at
                 scan_data['processing_duration'] = duration.total_seconds()
             

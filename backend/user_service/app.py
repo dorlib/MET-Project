@@ -396,7 +396,8 @@ def direct_update_scan(job_id):
         data.get('status'),
         data.get('metastasis_count'),
         data.get('total_volume'),
-        data.get('metastasis_volumes')
+        data.get('metastasis_volumes'),
+        data.get('patient_name')
     )
     
     if result["success"]:

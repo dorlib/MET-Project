@@ -238,6 +238,12 @@ const apiService = {
     return api.delete(`/user/scans/${scanId}`);
   },
   
+  updateScanPatientName: (scanId, patientName) => {
+    return api.put(`/user/scans/${scanId}/patient`, {
+      patient_name: patientName
+    });
+  },
+  
   // Export results handling
   exportResultsCSV: (jobId) => {
     return api.get(`/export/csv/${jobId}`, {

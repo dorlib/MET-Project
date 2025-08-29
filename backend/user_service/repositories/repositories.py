@@ -84,6 +84,18 @@ class ScanRepository:
         return scan
     
     @staticmethod
+    def update_scan_patient_name(db: Session, job_id: str, patient_name: str) -> Optional[Scan]:
+        """
+        Update scan with patient name
+        """
+        scan = db.query(Scan).filter(Scan.job_id == job_id).first()
+        if scan:
+            scan.patient_name = patient_name
+            db.commit()
+            db.refresh(scan)
+        return scan
+    
+    @staticmethod
     def get_user_scans(db: Session, user_id: int, skip: int = 0, limit: int = 10) -> List[Scan]:
         """
         Get all scans for a user with pagination

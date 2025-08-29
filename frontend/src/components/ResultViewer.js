@@ -17,20 +17,21 @@ import {
   Tabs,
   Tab,
   Button,
-  Stack
+  Stack,
+  TextField
 } from '@mui/material';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend } from 'chart.js';
 import VolumetricVisualization3D from './VolumetricVisualization3D';
 import VisualizationControls from './VisualizationControls';
 import ColorbarOverlay from './ColorbarOverlay';
-import { PictureAsPdf, TableChart } from '@mui/icons-material';
+import { PictureAsPdf, TableChart, Person, Save } from '@mui/icons-material';
 import api from '../services/api';
 
 // Register Chart.js components
 ChartJS.register(ArcElement, ChartTooltip, Legend);
 
-const ResultViewer = ({ jobId, status, results }) => {
+const ResultViewer = ({ jobId, status, results, hidePatientEdit = false }) => {
   const [tabValue, setTabValue] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [metastases3D, setMetastases3D] = useState([]);
@@ -53,6 +54,28 @@ const ResultViewer = ({ jobId, status, results }) => {
   const [axialSliceIndex, setAxialSliceIndex] = useState(50);
   const [coronalSliceIndex, setCoronalSliceIndex] = useState(50);
   const [sagittalSliceIndex, setSagittalSliceIndex] = useState(50);
+  
+  // Patient name state
+  const [patientName, setPatientName] = useState('');
+  const [savingPatientName, setSavingPatientName] = useState(false);
+  const [patientNameSaved, setPatientNameSaved] = useState(false);
+    
+  // Handle saving patient name
+  const handleSavePatientName = async () => {
+    if (!patientName.trim()) return;
+    
+    setSavingPatientName(true);
+    try {
+      await api.updateScanPatientName(jobId, patientName.trim());
+      setPatientNameSaved(true);
+      setTimeout(() => setPatientNameSaved(false), 3000); // Hide success message after 3 seconds
+    } catch (err) {
+      console.error('Error saving patient name:', err);
+      // Could add error handling here
+    } finally {
+      setSavingPatientName(false);
+    }
+  };
   
   // Utility function to ensure we have a valid slice index
   const ensureValidSlice = useCallback((slice) => {
@@ -526,6 +549,45 @@ const ResultViewer = ({ jobId, status, results }) => {
         </Grid>
         
         <Grid item xs={12} md={4}>
+          {!hidePatientEdit && (
+            <Card sx={{ mb: 2 }}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Person />
+                  Patient Information
+                </Typography>
+                
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Patient Name"
+                    value={patientName}
+                    onChange={(e) => setPatientName(e.target.value)}
+                    placeholder="Enter patient name"
+                    disabled={savingPatientName}
+                  />
+                  
+                  <Button
+                    variant="outlined"
+                    onClick={handleSavePatientName}
+                    disabled={!patientName.trim() || savingPatientName}
+                    startIcon={savingPatientName ? <CircularProgress size={16} /> : <Save />}
+                    color={patientNameSaved ? 'success' : 'primary'}
+                    fullWidth
+                  >
+                    {savingPatientName 
+                      ? 'Saving...' 
+                      : patientNameSaved 
+                        ? 'Saved!'
+                        : 'Save Patient Name'
+                    }
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+          
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>

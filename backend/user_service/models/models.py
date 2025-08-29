@@ -38,6 +38,7 @@ class Scan(Base):
     job_id = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     file_name = Column(String(255), nullable=False)
+    patient_name = Column(String(255), nullable=True)  # Patient name field
     status = Column(String(20), default='processing')  # processing, completed, failed
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     metastasis_count = Column(Integer, nullable=True)
@@ -63,6 +64,7 @@ class Scan(Base):
         return {
             "job_id": self.job_id,
             "file_name": self.file_name,
+            "patient_name": self.patient_name,
             "status": self.status,
             "created_at": self.created_at.isoformat(),
             "metastasis_count": self.metastasis_count,
