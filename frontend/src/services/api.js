@@ -224,6 +224,11 @@ const apiService = {
     });
   },
 
+  // Get scan details including processing duration
+  getScanDetails: (jobId) => {
+    return api.get(`/scans/${jobId}/details`);
+  },
+
   // Add missing getUserSettings function
   getUserSettings: () => {
     return api.get('/user/settings');

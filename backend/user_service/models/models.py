@@ -41,6 +41,7 @@ class Scan(Base):
     patient_name = Column(String(255), nullable=True)  # Patient name field
     status = Column(String(20), default='processing')  # processing, completed, failed
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)  # Track when processing completed
     metastasis_count = Column(Integer, nullable=True)
     total_volume = Column(Float, nullable=True)
     metastasis_volumes = Column(String(1000), nullable=True)  # Stored as JSON string

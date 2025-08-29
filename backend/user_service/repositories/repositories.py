@@ -1,4 +1,5 @@
 import json
+import datetime
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from models.models import User, Scan
@@ -79,6 +80,7 @@ class ScanRepository:
             scan.metastasis_count = metastasis_count
             scan.total_volume = total_volume
             scan.metastasis_volumes = json.dumps(metastasis_volumes)
+            scan.updated_at = datetime.datetime.utcnow()  # Set completion time
             db.commit()
             db.refresh(scan)
         return scan

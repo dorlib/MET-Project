@@ -811,6 +811,25 @@ def update_scan_patient_name(scan_id):
         logging.error(f"Error updating patient name for scan {scan_id}: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/scans/<job_id>/details', methods=['GET'])
+def get_scan_details(job_id):
+    """
+    Get scan details including processing duration - no authentication required
+    """
+    try:
+        response = requests.get(
+            f"{USER_SERVICE_URL}/scans/{job_id}/details"
+        )
+        
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        else:
+            return jsonify({"error": "Scan not found"}), 404
+            
+    except Exception as e:
+        logging.error(f"Error fetching scan details for {job_id}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 # 2FA endpoints have been removed
 
 @app.route('/export/csv/<job_id>', methods=['GET'])

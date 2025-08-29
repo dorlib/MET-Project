@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from utils.database import get_db
 from utils.jwt_util import verify_token
 from services.services import UserService, ScanService
+from models.models import Scan
 
 # Create blueprints
 auth_bp = Blueprint('auth', __name__, url_prefix='')
@@ -415,4 +416,34 @@ def update_scan_patient_name(job_id):
             
     except Exception as e:
         logger.error(f"Error in update_scan_patient_name: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@scan_bp.route('/scans/<job_id>/details', methods=['GET'])
+def get_scan_details(job_id):
+    """Get scan details by job_id (including processing duration) - no authentication required."""
+    try:
+        db = next(get_db())
+        
+        # Get scan details from the database directly by job_id
+        scan = db.query(Scan).filter(Scan.job_id == job_id).first()
+        
+        if not scan:
+            return jsonify({"error": "Scan not found"}), 404
+        
+        # Convert to dict and add processing duration
+        scan_data = scan.to_dict()
+        
+        # Add processing duration calculation
+        scan_data['processing_duration'] = None
+        if scan.created_at and scan.updated_at:
+            duration = scan.updated_at - scan.created_at
+            scan_data['processing_duration'] = duration.total_seconds()
+        
+        return jsonify({
+            "success": True,
+            "data": scan_data
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in get_scan_details: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500

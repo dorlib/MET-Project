@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
   Paper,
@@ -32,7 +32,8 @@ import {
   Schedule,
   FilePresent,
   CheckCircleOutline,
-  InfoOutlined
+  InfoOutlined,
+  Timer
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import ResultViewer from './ResultViewer';
@@ -43,6 +44,13 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
   const [scanStatus, setScanStatus] = useState(status || null);
   const [loading, setLoading] = useState(!results);
   const [error, setError] = useState(null);
+  const [sliceViewProcessingTime, setSliceViewProcessingTime] = useState(null);
+
+  // Handle processing time updates from ResultViewer
+  const handleProcessingTimeUpdate = useCallback((duration) => {
+    console.log('🔥 SCAN DETAILS: Received processing time from ResultViewer:', duration);
+    setSliceViewProcessingTime(duration);
+  }, []);
 
   useEffect(() => {
     const fetchScanInfo = async () => {
@@ -79,24 +87,61 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
           return;
         }
         
-        // Also try to fetch patient name from user scans
+        // Also try to fetch scan details (including processing duration) from user service
+        try {
+          console.log('Attempting to fetch scan details for jobId:', jobId);
+          console.log('api.getScanDetails method exists:', typeof api.getScanDetails);
+          
+          if (typeof api.getScanDetails !== 'function') {
+            console.error('api.getScanDetails is not a function!');
+            throw new Error('getScanDetails method not available');
+          }
+          
+          const scanDetailsResponse = await api.getScanDetails(jobId);
+          console.log('Scan details response:', scanDetailsResponse);
+          
+          if (scanDetailsResponse.data && scanDetailsResponse.data.success) {
+            const scanDetails = scanDetailsResponse.data.data;
+            console.log('Scan details data:', scanDetails);
+            console.log('Processing duration found:', scanDetails.processing_duration);
+            
+            // Update scan info with details from user service
+            setScanInfo(prevInfo => {
+              const updatedInfo = {
+                ...prevInfo,
+                patient_name: scanDetails.patient_name || prevInfo.patient_name,
+                file_name: scanDetails.file_name || prevInfo.file_name,
+                created_at: scanDetails.created_at || prevInfo.created_at,
+                processing_duration: scanDetails.processing_duration // Add processing duration
+              };
+              console.log('Updated scan info:', updatedInfo);
+              return updatedInfo;
+            });
+          }
+        } catch (scanDetailsError) {
+          // Don't fail if we can't get scan details - just continue without processing time
+          console.error('Could not fetch scan details:', scanDetailsError);
+        }
+        
+        // Also try to fetch patient name from user scans as fallback
         try {
           const userScansResponse = await api.getUserScans(1, 100); // Get up to 100 scans to find this one
           if (userScansResponse.data && userScansResponse.data.scans) {
             const matchingScan = userScansResponse.data.scans.find(scan => scan.job_id === jobId);
-            if (matchingScan && matchingScan.patient_name) {
-              // Update scan info with patient name from user service
+            if (matchingScan) {
+              // Update scan info with patient name and processing duration from user service
               setScanInfo(prevInfo => ({
                 ...prevInfo,
                 patient_name: matchingScan.patient_name,
                 file_name: matchingScan.file_name || prevInfo.file_name,
-                created_at: matchingScan.created_at || prevInfo.created_at
+                created_at: matchingScan.created_at || prevInfo.created_at,
+                processing_duration: matchingScan.processing_duration // Add processing duration
               }));
             }
           }
         } catch (userScanError) {
-          // Don't fail if we can't get user scans - just continue without patient name
-          console.log('Could not fetch patient name from user scans:', userScanError);
+          // Don't fail if we can't get user scans - just continue without patient name/processing time
+          console.log('Could not fetch additional scan details from user scans:', userScanError);
         }
         
       } catch (err) {
@@ -132,6 +177,23 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
       return format(new Date(dateString), 'MMM dd, yyyy - HH:mm');
     } catch (error) {
       return 'Unknown date';
+    }
+  };
+
+  // Format processing duration
+  const formatDuration = (seconds) => {
+    if (!seconds || seconds < 0) return null;
+    
+    if (seconds < 60) {
+      return `${seconds.toFixed(1)}s`;
+    } else if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = Math.floor(seconds % 60);
+      return `${minutes}m ${remainingSeconds}s`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${minutes}m`;
     }
   };
 
@@ -322,6 +384,33 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
                     secondary={scanStatus || 'Unknown'} 
                   />
                 </ListItem>
+                
+                {/* Show processing time - always show if we have a value */}
+                {sliceViewProcessingTime && (
+                  <ListItem sx={{ px: 0, py: 1 }}>
+                    <ListItemIcon>
+                      <Timer color="primary" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="Processing Time" 
+                      secondary={formatDuration(sliceViewProcessingTime)} 
+                    />
+                  </ListItem>
+                )}
+                
+                {/* Debug: Test processing time button */}
+                <ListItem sx={{ px: 0, py: 1 }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => {
+                      console.log('🔥 TEST: Manually setting processing time');
+                      setSliceViewProcessingTime(2.5); // Set 2.5 seconds as test
+                    }}
+                  >
+                    Test Processing Time
+                  </Button>
+                </ListItem>
               </List>
             </CardContent>
           </Card>
@@ -428,6 +517,7 @@ const ScanDetails = ({ jobId, onNavigateBack, results, status }) => {
                 status={scanStatus} 
                 results={scanInfo}
                 hidePatientEdit={true}
+                onProcessingTimeUpdate={handleProcessingTimeUpdate}
               />
             </CardContent>
           </Card>

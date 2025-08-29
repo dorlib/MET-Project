@@ -32,11 +32,15 @@ import api from '../services/api';
 // Register Chart.js components
 ChartJS.register(ArcElement, ChartTooltip, Legend);
 
-const ResultViewer = ({ jobId, status, results, hidePatientEdit = false }) => {
+const ResultViewer = ({ jobId, status, results, hidePatientEdit = false, onProcessingTimeUpdate }) => {
   const [tabValue, setTabValue] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [metastases3D, setMetastases3D] = useState([]);
   const [loading3D, setLoading3D] = useState(false);
+  
+  // Processing time tracking
+  const [loadingStartTime, setLoadingStartTime] = useState(null);
+  const [processingTime, setProcessingTime] = useState(null);
   
   // Visualization settings
   const [vizType, setVizType] = useState('slice');
@@ -257,6 +261,59 @@ const ResultViewer = ({ jobId, status, results, hidePatientEdit = false }) => {
       console.log("Results contains segmentation_path:", results.segmentation_path ? "Yes" : "No");
     }
   }, [results]);
+
+  // Track when slice view starts loading
+  useEffect(() => {
+    if (status === 'completed' && jobId && !loadingStartTime) {
+      console.log('🔥 PROCESSING TIME: Starting processing time tracking for slice view');
+      console.log('🔥 Job ID:', jobId);
+      console.log('🔥 Status:', status);
+      const startTime = Date.now();
+      setLoadingStartTime(startTime);
+      console.log('🔥 Start time set to:', startTime);
+    }
+  }, [status, jobId, loadingStartTime]);
+
+  // Handle when slice image loads successfully  
+  const handleImageLoad = useCallback((e) => {
+    console.log('🔥 PROCESSING TIME: Image loaded!');
+    console.log(`🔥 Image dimensions: ${e.target.naturalWidth}x${e.target.naturalHeight}`);
+    console.log('🔥 Loading start time:', loadingStartTime);
+    console.log('🔥 Current processing time:', processingTime);
+    
+    // Calculate processing time if we haven't already
+    if (loadingStartTime && !processingTime) {
+      const endTime = Date.now();
+      const duration = (endTime - loadingStartTime) / 1000; // Convert to seconds
+      console.log('🔥 PROCESSING TIME CALCULATED:', duration, 'seconds');
+      console.log('🔥 Start time was:', loadingStartTime);
+      console.log('🔥 End time is:', endTime);
+      setProcessingTime(duration);
+      
+      // Notify parent component about processing time
+      if (onProcessingTimeUpdate) {
+        console.log('🔥 CALLING onProcessingTimeUpdate with duration:', duration);
+        onProcessingTimeUpdate(duration);
+      } else {
+        console.log('🔥 ERROR: onProcessingTimeUpdate callback not provided!');
+      }
+    } else {
+      console.log('🔥 SKIPPING processing time calculation:');
+      console.log('🔥 - loadingStartTime exists:', !!loadingStartTime);
+      console.log('🔥 - processingTime already exists:', !!processingTime);
+    }
+    
+    // Hide the spinner when image loads
+    const spinners = document.querySelectorAll('.MuiCircularProgress-root');
+    spinners.forEach(spinner => {
+      spinner.style.display = 'none';
+    });
+    
+    // If the image is extremely small, it might be empty
+    if (e.target.naturalWidth < 10 || e.target.naturalHeight < 10) {
+      console.warn("Image dimensions are very small - might be empty");
+    }
+  }, [loadingStartTime, processingTime, onProcessingTimeUpdate]);
 
   // Fetch real 3D metastases data when component loads
   useEffect(() => {
@@ -764,19 +821,7 @@ const ResultViewer = ({ jobId, status, results, hidePatientEdit = false }) => {
                     backgroundColor: '#000',
                     filter: 'brightness(110%)' // Subtle brightness enhancement without affecting colors
                   }}
-                  onLoad={(e) => {
-                    console.log(`Image loaded: ${e.target.naturalWidth}x${e.target.naturalHeight}`);
-                    // Hide the spinner when image loads
-                    const spinners = document.querySelectorAll('.MuiCircularProgress-root');
-                    spinners.forEach(spinner => {
-                      spinner.style.display = 'none';
-                    });
-                    
-                    // If the image is extremely small, it might be empty
-                    if (e.target.naturalWidth < 10 || e.target.naturalHeight < 10) {
-                      console.warn("Image dimensions are very small - might be empty");
-                    }
-                  }}
+                  onLoad={handleImageLoad}
                   onError={(e) => {
                     console.error('Error loading visualization');
                     
