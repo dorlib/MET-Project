@@ -18,14 +18,15 @@ import {
   Tab,
   Button,
   Stack,
-  TextField
+  TextField,
+  IconButton
 } from '@mui/material';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend } from 'chart.js';
 import VolumetricVisualization3D from './VolumetricVisualization3D';
 import VisualizationControls from './VisualizationControls';
 import ColorbarOverlay from './ColorbarOverlay';
-import { PictureAsPdf, TableChart, Person, Save } from '@mui/icons-material';
+import { PictureAsPdf, TableChart, Person, Save, Visibility, VisibilityOff } from '@mui/icons-material';
 import api from '../services/api';
 
 // Register Chart.js components
@@ -59,6 +60,9 @@ const ResultViewer = ({ jobId, status, results, hidePatientEdit = false }) => {
   const [patientName, setPatientName] = useState('');
   const [savingPatientName, setSavingPatientName] = useState(false);
   const [patientNameSaved, setPatientNameSaved] = useState(false);
+  
+  // Colorbar visibility state
+  const [showColorbar, setShowColorbar] = useState(true);
     
   // Handle saving patient name
   const handleSavePatientName = async () => {
@@ -681,9 +685,27 @@ const ResultViewer = ({ jobId, status, results, hidePatientEdit = false }) => {
           
           <Divider sx={{ my: 2 }} />
           
-          <Typography variant="h6" gutterBottom>
-            Slice View
-          </Typography>
+          {/* Colorbar Toggle Button */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <Typography variant="h6">
+              Slice View
+            </Typography>
+            <IconButton
+              onClick={() => setShowColorbar(!showColorbar)}
+              size="small"
+              sx={{ 
+                ml: 'auto',
+                color: showColorbar ? 'primary.main' : 'text.secondary',
+                '&:hover': {
+                  backgroundColor: showColorbar ? 'primary.light' : 'action.hover',
+                  opacity: 0.8
+                }
+              }}
+              title={showColorbar ? 'Hide tissue bar' : 'Show tissue bar'}
+            >
+              {showColorbar ? <Visibility /> : <VisibilityOff />}
+            </IconButton>
+          </Box>
           
           {/* Render the slice view based on selected settings */}
           <Box 
@@ -814,14 +836,16 @@ const ResultViewer = ({ jobId, status, results, hidePatientEdit = false }) => {
             </Typography>
 
             {/* Custom enlarged colorbar overlay */}
-            <ColorbarOverlay 
-              tissueClasses={[
-                { id: 0, name: 'Background', color: '#440154', value: 0 },
-                { id: 1, name: 'Class 1', color: '#31688e', value: 1 },
-                { id: 2, name: 'Edema', color: '#35b779', value: 2 },
-                { id: 3, name: 'Metastasis', color: '#fde725', value: 3 }
-              ]}
-            />
+            {showColorbar && (
+              <ColorbarOverlay 
+                tissueClasses={[
+                  { id: 0, name: 'Background', color: '#440154', value: 0 },
+                  { id: 1, name: 'Class 1', color: '#31688e', value: 1 },
+                  { id: 2, name: 'Edema', color: '#35b779', value: 2 },
+                  { id: 3, name: 'Metastasis', color: '#fde725', value: 3 }
+                ]}
+              />
+            )}
           </Box>
         </Box>
       )}
