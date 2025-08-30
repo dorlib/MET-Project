@@ -1,7 +1,9 @@
 import json
 import datetime
+import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from models.models import User, Scan
 
 class UserRepository:
@@ -39,11 +41,16 @@ class UserRepository:
 
 class ScanRepository:
     @staticmethod
-    def create_scan(db: Session, job_id: str, file_name: str, user_id: Optional[int] = None) -> Scan:
+    def create_scan(db: Session, job_id: str, file_name: str, user_id: Optional[int] = None, 
+                   model_name: Optional[str] = None) -> Scan:
         """
         Create a new scan record
         """
-        scan = Scan(job_id=job_id, file_name=file_name, user_id=user_id)
+        # Handle string 'None' as None and set default model if not specified
+        if not model_name or model_name == 'None' or model_name == 'null':
+            model_name = "brats_t1ce"  # Default model
+            
+        scan = Scan(job_id=job_id, file_name=file_name, user_id=user_id, model_name=model_name)
         db.add(scan)
         db.commit()
         db.refresh(scan)
@@ -136,6 +143,20 @@ class ScanRepository:
             
         if 'end_date' in filters and filters['end_date'] is not None:
             query = query.filter(Scan.created_at <= filters['end_date'])
+            
+        if 'model_name' in filters and filters['model_name'] is not None:
+            filter_model_name = filters['model_name']
+            # Handle both with and without .pth extension
+            # Create an OR condition to match both "model" and "model.pth"
+            model_without_pth = filter_model_name.replace('.pth', '') if filter_model_name.endswith('.pth') else filter_model_name
+            model_with_pth = model_without_pth + '.pth'
+            
+            query = query.filter(
+                or_(
+                    Scan.model_name == model_without_pth,
+                    Scan.model_name == model_with_pth
+                )
+            )
         
         # Order by newest first and paginate
         query = query.order_by(Scan.created_at.desc()).offset(skip).limit(limit)
@@ -167,6 +188,20 @@ class ScanRepository:
             
         if 'end_date' in filters and filters['end_date'] is not None:
             query = query.filter(Scan.created_at <= filters['end_date'])
+            
+        if 'model_name' in filters and filters['model_name'] is not None:
+            filter_model_name = filters['model_name']
+            # Handle both with and without .pth extension
+            # Create an OR condition to match both "model" and "model.pth"
+            model_without_pth = filter_model_name.replace('.pth', '') if filter_model_name.endswith('.pth') else filter_model_name
+            model_with_pth = model_without_pth + '.pth'
+            
+            query = query.filter(
+                or_(
+                    Scan.model_name == model_without_pth,
+                    Scan.model_name == model_with_pth
+                )
+            )
         
         return query.count()
 

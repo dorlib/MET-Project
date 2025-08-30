@@ -234,8 +234,16 @@ def upload_file():
         if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
             return jsonify({"error": "File processing failed or empty file received"}), 400
         
-        # Get model parameter from query string
-        model_name = request.args.get('model')
+        # Get model parameter from query string or form data
+        model_name = request.args.get('model') or request.form.get('model_name')
+        
+        # Default to 'brats_t1ce' if not specified
+        if not model_name:
+            model_name = 'brats_t1ce'
+        
+        # Strip .pth extension for consistent database storage
+        if model_name.endswith('.pth'):
+            model_name = model_name[:-4]
         
         # Forward to model service for prediction
         try:
@@ -260,15 +268,19 @@ def upload_file():
         if response.status_code == 200:
             # Register scan with user service (with or without user association)
             try:
+                scan_data = {
+                    "job_id": job_id,
+                    "file_name": filename,
+                    "user_email": user_email,
+                    "status": "processing",
+                    "model_name": model_name
+                }
+                    
                 scan_response = requests.post(
                     f"{USER_SERVICE_URL}/scans",
-                    json={
-                        "job_id": job_id,
-                        "file_name": filename,
-                        "user_email": user_email,
-                        "status": "processing"
-                    }
+                    json=scan_data
                 )
+                
                 if scan_response.status_code >= 400:
                     logging.warning(f"User service returned error when registering scan: {scan_response.text}")
             except Exception as e:

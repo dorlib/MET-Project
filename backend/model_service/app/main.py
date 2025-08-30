@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 import uuid
 import threading
 import queue
+import requests
 from pydantic import BaseModel
 
 from .model import get_model
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 MODELS_DIR = "/app/models"
 RESULTS_DIR = "/app/results"
 UPLOADS_DIR = "/app/uploads"
+USER_SERVICE_URL = os.environ.get("USER_SERVICE_URL", "http://172.18.0.4:5003")
+IMAGE_PROCESSING_SERVICE_URL = os.environ.get("IMAGE_PROCESSING_SERVICE_URL", "http://172.18.0.5:5002")
 
 # Ensure directories exist
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -65,6 +68,79 @@ CURRENT_MODEL_NAME = None  # Track currently loaded model
 # Set torch to use multiple threads for CPU inference
 torch.set_num_threads(4)
 torch.set_num_interop_threads(4)
+
+def trigger_metastases_analysis(job_id: str):
+    """
+    Trigger metastases analysis from the image processing service
+    and update the final scan results in the user service
+    """
+    try:
+        logger.info(f"Triggering metastases analysis for job {job_id}")
+        
+        # Call image processing service to analyze metastases
+        response = requests.get(f"{IMAGE_PROCESSING_SERVICE_URL}/analyze/{job_id}", timeout=30)
+        
+        if response.status_code == 200:
+            analysis_data = response.json()
+            logger.info(f"Metastases analysis completed for job {job_id}: {analysis_data.get('metastasis_count', 0)} metastases found")
+            
+            # Update scan in user service with complete results
+            update_payload = {
+                "status": "completed",
+                "metastasis_count": analysis_data.get("metastasis_count"),
+                "total_volume": analysis_data.get("total_volume"),
+                "metastasis_volumes": analysis_data.get("metastasis_volumes")
+            }
+            
+            user_response = requests.put(
+                f"{USER_SERVICE_URL}/scans/{job_id}",
+                json=update_payload,
+                timeout=10
+            )
+            
+            if user_response.status_code == 200:
+                logger.info(f"Successfully updated scan {job_id} with metastases analysis results")
+            else:
+                logger.error(f"Failed to update scan {job_id} with analysis results. Response: {user_response.status_code} - {user_response.text}")
+        else:
+            logger.error(f"Metastases analysis failed for job {job_id}. Response: {response.status_code} - {response.text}")
+            # Still mark as completed but without metastases data
+            update_scan_status_in_user_service(job_id, "completed")
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error during metastases analysis for job {job_id}: {str(e)}")
+        # Mark as completed even if analysis fails
+        update_scan_status_in_user_service(job_id, "completed")
+    except Exception as e:
+        logger.error(f"Unexpected error during metastases analysis for job {job_id}: {str(e)}")
+        # Mark as completed even if analysis fails
+        update_scan_status_in_user_service(job_id, "completed")
+
+def update_scan_status_in_user_service(job_id: str, status: str, error_message: str = None):
+    """
+    Callback function to update scan status in the user service database
+    """
+    try:
+        url = f"{USER_SERVICE_URL}/scans/{job_id}"
+        payload = {"status": status}
+        
+        if error_message and status == "failed":
+            # Include error message in the payload if it's a failure
+            payload["error_message"] = error_message
+            
+        logger.info(f"Updating scan status for job {job_id} to '{status}' at {url}")
+        
+        response = requests.put(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            logger.info(f"Successfully updated scan {job_id} status to '{status}' in user service")
+        else:
+            logger.error(f"Failed to update scan {job_id} status. Response: {response.status_code} - {response.text}")
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error updating scan {job_id} status: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error updating scan {job_id} status: {str(e)}")
 
 def background_worker():
     """Background worker thread that processes jobs from the queue"""
@@ -263,6 +339,9 @@ def process_prediction_sync(file_path: str, job_id: str):
         )
         logger.info(f"Job {job_id} completed successfully")
         
+        # Trigger metastases analysis and final status update
+        trigger_metastases_analysis(job_id)
+        
     except Exception as e:
         logger.error(f"Error processing job {job_id}: {str(e)}")
         job_registry[job_id] = JobStatus(
@@ -272,6 +351,9 @@ def process_prediction_sync(file_path: str, job_id: str):
             start_time=job_registry[job_id].start_time if job_id in job_registry else time.time(),
             end_time=time.time()
         )
+        
+        # Notify user service that the job failed
+        update_scan_status_in_user_service(job_id, "failed", str(e))
 
 @app.post("/predict")
 async def predict_endpoint(request: PredictionRequest):

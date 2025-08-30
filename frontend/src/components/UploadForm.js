@@ -426,27 +426,33 @@ const UploadForm = ({ onUploadSuccess }) => {
                 ) : models.length === 0 ? (
                   <MenuItem disabled>No models available</MenuItem>
                 ) : (
-                  models.map((model) => (
-                    <MenuItem key={model.name} value={model.name}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                        <Box>
-                          <Typography variant="body1">{model.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            Size: {model.size_mb?.toFixed(1)} MB
-                            {model.is_loaded && ' • Currently Loaded'}
-                          </Typography>
+                  models.map((model) => {
+                    // Strip .pth extension for display
+                    const displayName = model.name.endsWith('.pth') 
+                      ? model.name.slice(0, -4) 
+                      : model.name;
+                    return (
+                      <MenuItem key={model.name} value={model.name}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                          <Box>
+                            <Typography variant="body1">{displayName}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Size: {model.size_mb?.toFixed(1)} MB
+                              {model.is_loaded && ' • Currently Loaded'}
+                            </Typography>
+                          </Box>
+                          {model.is_loaded && (
+                            <Chip
+                              label="Active"
+                              size="small"
+                              color="success"
+                              sx={{ ml: 1 }}
+                            />
+                          )}
                         </Box>
-                        {model.is_loaded && (
-                          <Chip
-                            label="Active"
-                            size="small"
-                            color="success"
-                            sx={{ ml: 1 }}
-                          />
-                        )}
-                      </Box>
-                    </MenuItem>
-                  ))
+                      </MenuItem>
+                    );
+                  })
                 )}
               </Select>
             </FormControl>
@@ -454,7 +460,9 @@ const UploadForm = ({ onUploadSuccess }) => {
             {selectedModel && (
               <Alert severity="info" sx={{ borderRadius: 2 }}>
                 <Typography variant="body2">
-                  Selected model: <strong>{selectedModel}</strong>
+                  Selected model: <strong>
+                    {selectedModel.endsWith('.pth') ? selectedModel.slice(0, -4) : selectedModel}
+                  </strong>
                   {models.find(m => m.name === selectedModel)?.is_loaded 
                     ? ' (Ready for immediate processing)' 
                     : ' (Will be loaded automatically)'}

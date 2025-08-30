@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Filter API</title>
+</head>
+<body>
+    <h1>Debug Filter API</h1>
+    
+    <div>
+        <h2>Test Model Filters</h2>
+        <button onclick="testFilterBrats()">Test brats_t1ce Filter</button>
+        <button onclick="testFilterTversky()">Test brats_t1ce-tversky-boundary-best Filter</button>
+        <button onclick="testModelsEndpoint()">Test Models Endpoint</button>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script>
+        function log(message) {
+            const results = document.getElementById('results');
+            results.innerHTML += '<div>' + JSON.stringify(message, null, 2) + '</div><hr>';
+        }
+        
+        async function testFilterBrats() {
+            try {
+                const response = await fetch('http://localhost:8000/user/scans/filter?model_name=brats_t1ce', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const data = await response.json();
+                log('Filter brats_t1ce result: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('Error testing brats_t1ce filter: ' + error.message);
+            }
+        }
+        
+        async function testFilterTversky() {
+            try {
+                const response = await fetch('http://localhost:8000/user/scans/filter?model_name=brats_t1ce-tversky-boundary-best', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const data = await response.json();
+                log('Filter tversky result: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('Error testing tversky filter: ' + error.message);
+            }
+        }
+        
+        async function testModelsEndpoint() {
+            try {
+                const response = await fetch('http://localhost:8000/models', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const data = await response.json();
+                log('Models endpoint result: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('Error testing models endpoint: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

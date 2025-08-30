@@ -78,7 +78,8 @@ def direct_scans():
             db,
             data['job_id'],
             data['file_name'],
-            data.get('user_email')
+            data.get('user_email'),
+            data.get('model_name')  # Add model_name parameter
         )
         
         if result["success"]:
@@ -211,7 +212,8 @@ def direct_filter_scans():
             filter_params = [
                 'min_metastasis', 'max_metastasis', 
                 'min_volume', 'max_volume',
-                'start_date', 'end_date'
+                'start_date', 'end_date',
+                'model_name'
             ]
             
             for param in filter_params:

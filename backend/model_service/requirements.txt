@@ -8,3 +8,4 @@ einops>=0.4.1
 numpy>=1.19.0,<1.22.0
 gunicorn>=20.1.0,<21.0.0
 self-attention-cv>=1.0.4
+requests>=2.25.0,<3.0.0

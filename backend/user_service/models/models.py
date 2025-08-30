@@ -39,6 +39,7 @@ class Scan(Base):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     file_name = Column(String(255), nullable=False)
     patient_name = Column(String(255), nullable=True)  # Patient name field
+    model_name = Column(String(255), nullable=True)  # Model used for processing
     status = Column(String(20), default='processing')  # processing, completed, failed
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, nullable=True)  # Track when processing completed
@@ -62,12 +63,20 @@ class Scan(Base):
                 # If parsing fails, return it as is
                 metastasis_volumes = self.metastasis_volumes
         
+        # Calculate processing duration if both timestamps exist
+        processing_duration = None
+        if self.created_at and self.updated_at:
+            time_diff = self.updated_at - self.created_at
+            processing_duration = time_diff.total_seconds()
+        
         return {
             "job_id": self.job_id,
             "file_name": self.file_name,
             "patient_name": self.patient_name,
+            "model_name": self.model_name,
             "status": self.status,
             "created_at": self.created_at.isoformat(),
+            "processing_duration": processing_duration,
             "metastasis_count": self.metastasis_count,
             "total_volume": self.total_volume,
             "metastasis_volumes": metastasis_volumes

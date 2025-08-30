@@ -200,13 +200,60 @@ def create_scan():
         db,
         data['job_id'],
         data['file_name'],
-        data.get('user_email')
+        data.get('user_email'),
+        data.get('model_name')
     )
     
     if result["success"]:
         return jsonify(result["data"]), result["status_code"]
     else:
         return jsonify({"error": result["error"]}), result["status_code"]
+
+@scan_bp.route('/models', methods=['GET'])
+def get_available_models():
+    """Get list of available models from the Data/saved_models directory"""
+    try:
+        import os
+        
+        # Dynamic scanning of available models from Data/saved_models directory
+        models_directory = "/app/../../../Data/saved_models"  # Path to Data/saved_models from container
+        available_models = []
+        
+        # Try different possible paths
+        possible_paths = [
+            "/app/../../../Data/saved_models",
+            "/app/../../Data/saved_models", 
+            "/app/Data/saved_models",
+            "/Data/saved_models"
+        ]
+        
+        models_dir = None
+        for path in possible_paths:
+            if os.path.exists(path) and os.path.isdir(path):
+                models_dir = path
+                break
+        
+        if models_dir:
+            # Scan directory for .pth files
+            for filename in os.listdir(models_dir):
+                if filename.endswith('.pth'):
+                    available_models.append(filename)
+        
+        # Fallback to default if no models found or directory doesn't exist
+        if not available_models:
+            available_models = ["brats_t1ce.pth"]
+        
+        return jsonify({
+            "success": True,
+            "models": available_models
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting available models: {str(e)}")
+        # Fallback to default model on error
+        return jsonify({
+            "success": True,
+            "models": ["brats_t1ce.pth"]
+        }), 200
 
 @scan_bp.route('/scans/<job_id>', methods=['PUT'])
 def update_scan(job_id):
@@ -307,7 +354,8 @@ def filter_scans():
         filter_params = [
             'min_metastasis', 'max_metastasis', 
             'min_volume', 'max_volume',
-            'start_date', 'end_date'
+            'start_date', 'end_date',
+            'model_name'
         ]
         
         for param in filter_params:

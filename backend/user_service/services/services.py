@@ -77,7 +77,8 @@ class UserService:
 
 class ScanService:
     @staticmethod
-    def create_scan(db: Session, job_id: str, file_name: str, user_email: Optional[str] = None) -> Dict:
+    def create_scan(db: Session, job_id: str, file_name: str, user_email: Optional[str] = None, 
+                   model_name: Optional[str] = None) -> Dict:
         """
         Create a new scan record
         """
@@ -88,7 +89,7 @@ class ScanService:
                 user_id = user.id
         
         try:
-            scan = ScanRepository.create_scan(db, job_id, file_name, user_id)
+            scan = ScanRepository.create_scan(db, job_id, file_name, user_id, model_name)
             return {
                 "success": True, 
                 "data": scan.to_dict(),

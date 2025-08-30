@@ -100,7 +100,9 @@ const UserProfile = () => {
         // Use the filter endpoint if filters are applied, otherwise use regular endpoint
         let response;
         if (Object.keys(filters).length > 0) {
+          console.log('UserProfile: Filtering scans with params:', params);
           response = await api.filterScans(params);
+          console.log('UserProfile: Filter response:', response);
         } else {
           response = await api.getUserScans(page + 1, rowsPerPage);
         }
@@ -294,10 +296,10 @@ const UserProfile = () => {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Grid container spacing={4}>
         {/* User info card */}
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <Card>
             <CardContent sx={{ textAlign: 'center', py: 3 }}>
               <Avatar 
@@ -370,7 +372,7 @@ const UserProfile = () => {
         </Grid>
         
         {/* Scan history */}
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12} md={9}>
           <Card>
             <CardContent>
               <Box display="flex" alignItems="center" mb={2}>
@@ -421,16 +423,17 @@ const UserProfile = () => {
                   No scans found matching "{patientNameSearch}". Try a different search term.
                 </Alert>
               ) : (
-                <TableContainer>
-                  <Table>
+                <TableContainer sx={{ width: '100%' }}>
+                  <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Date</TableCell>
-                        <TableCell>Patient Name</TableCell>
-                        <TableCell>File</TableCell>
-                        <TableCell>Status</TableCell>
-                        <TableCell align="right">Results</TableCell>
-                        <TableCell align="center">Actions</TableCell>
+                        <TableCell sx={{ width: '140px' }}>Date</TableCell>
+                        <TableCell sx={{ minWidth: '200px' }}>Patient Name</TableCell>
+                        <TableCell sx={{ maxWidth: '200px' }}>File</TableCell>
+                        <TableCell sx={{ width: '120px' }}>Model</TableCell>
+                        <TableCell sx={{ width: '100px' }}>Status</TableCell>
+                        <TableCell align="right" sx={{ width: '120px' }}>Results</TableCell>
+                        <TableCell align="center" sx={{ width: '100px' }}>Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -446,7 +449,7 @@ const UserProfile = () => {
                                   onChange={(e) => setPatientNameValue(e.target.value)}
                                   placeholder="Enter patient name"
                                   disabled={updatingPatientName}
-                                  sx={{ minWidth: '150px' }}
+                                  sx={{ minWidth: '150px', maxWidth: '180px' }}
                                 />
                                 <IconButton
                                   size="small"
@@ -483,7 +486,22 @@ const UserProfile = () => {
                               </Box>
                             )}
                           </TableCell>
-                          <TableCell>{scan.file_name}</TableCell>
+                          <TableCell sx={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Tooltip title={scan.file_name}>
+                              <span>{scan.file_name}</span>
+                            </Tooltip>
+                          </TableCell>
+                          <TableCell>
+                            <Tooltip title={scan.model_name || 'brats_t1ce.pth'}>
+                              <Chip 
+                                label={(scan.model_name || 'brats_t1ce.pth').replace('.pth', '')} 
+                                size="small" 
+                                variant="outlined"
+                                color="primary"
+                                sx={{ maxWidth: '110px', fontSize: '0.75rem' }}
+                              />
+                            </Tooltip>
+                          </TableCell>
                           <TableCell>{getStatusChip(scan.status)}</TableCell>
                           <TableCell align="right">
                             {scan.status === 'completed' ? (

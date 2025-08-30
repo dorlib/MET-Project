@@ -46,7 +46,12 @@ const apiService = {
   },
   
   // Scan upload and analysis with retry functionality
-  uploadScan: async (formData, onProgress) => {
+  uploadScan: async (formData, onProgress, selectedModel) => {
+    // Add selected model to formData if provided
+    if (selectedModel) {
+      formData.append('model_name', selectedModel);
+    }
+    
     // Configuration
     const maxRetries = 3;
     const retryDelay = 2000; // 2 seconds
@@ -234,7 +239,7 @@ const apiService = {
     return api.get('/user/settings');
   },
   
-  // Add missing getModels function
+  // Get available models (dynamically from filesystem)
   getModels: () => {
     return api.get('/models');
   },

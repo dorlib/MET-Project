@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Paper,
   Typography,
@@ -8,7 +8,11 @@ import {
   Box,
   IconButton,
   Collapse,
-  InputAdornment
+  InputAdornment,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from '@mui/material';
 import { 
   FilterList, 
@@ -17,6 +21,7 @@ import {
   ExpandLess,
   Search
 } from '@mui/icons-material';
+import apiService from '../services/api';
 
 /**
  * Advanced filter component for scan history
@@ -27,6 +32,7 @@ import {
  */
 const ScanFilter = ({ onFilter, initialFilters = {} }) => {
   const [expanded, setExpanded] = useState(false);
+  const [models, setModels] = useState([]);
   const [filters, setFilters] = useState({
     min_metastasis: initialFilters.min_metastasis || '',
     max_metastasis: initialFilters.max_metastasis || '',
@@ -34,8 +40,23 @@ const ScanFilter = ({ onFilter, initialFilters = {} }) => {
     max_volume: initialFilters.max_volume || '',
     start_date: initialFilters.start_date || '',
     end_date: initialFilters.end_date || '',
+    model_name: initialFilters.model_name || '',
     ...initialFilters
   });
+
+  // Fetch available models on component mount
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const response = await apiService.getModels();
+        setModels(response.data.models || []);
+      } catch (error) {
+        console.error('Error fetching models:', error);
+      }
+    };
+    
+    fetchModels();
+  }, []);
 
   const handleChange = (field) => (event) => {
     setFilters({
@@ -51,7 +72,8 @@ const ScanFilter = ({ onFilter, initialFilters = {} }) => {
       min_volume: '',
       max_volume: '',
       start_date: '',
-      end_date: ''
+      end_date: '',
+      model_name: ''
     });
     
     // Apply the cleared filters
@@ -68,6 +90,9 @@ const ScanFilter = ({ onFilter, initialFilters = {} }) => {
         appliedFilters[key] = filters[key];
       }
     });
+    
+    console.log('ScanFilter: Applying filters:', appliedFilters);
+    console.log('ScanFilter: Available models:', models);
     
     onFilter(appliedFilters);
   };
@@ -170,6 +195,29 @@ const ScanFilter = ({ onFilter, initialFilters = {} }) => {
                   shrink: true
                 }}
               />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Model</InputLabel>
+                <Select
+                  value={filters.model_name}
+                  onChange={handleChange('model_name')}
+                  label="Model"
+                >
+                  <MenuItem value="">All Models</MenuItem>
+                  {models.map((model) => {
+                    // Strip .pth extension for display and filtering
+                    const displayName = model.name.endsWith('.pth') 
+                      ? model.name.slice(0, -4) 
+                      : model.name;
+                    return (
+                      <MenuItem key={model.name} value={displayName}>
+                        {displayName}
+                      </MenuItem>
+                    );
+                  })}
+                </Select>
+              </FormControl>
             </Grid>
           </Grid>
           
