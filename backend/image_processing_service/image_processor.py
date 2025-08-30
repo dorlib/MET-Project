@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 from skimage import measure
 import pandas as pd
 import nibabel as nib
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, gaussian_filter
 import cv2
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for matplotlib
@@ -45,6 +45,10 @@ METASTASIS_CLASS = 3  # Class 3 is for metastasis/tumor core in the model output
 EDEMA_CLASS = 2       # Class 2 is for edema
 TUMOR_CORE_CLASS = 3  # Class 3 is for tumor core (same as metastasis)
 VOXEL_VOLUME_MM3 = 1.0  # Default voxel volume in mm³ (can be adjusted based on scan parameters)
+
+# Gaussian filter configuration for improved volume precision
+USE_GAUSSIAN_FILTERING = True    # Enable Gaussian filtering for more precise volume calculations
+GAUSSIAN_SIGMA = 0.5            # Standard deviation for Gaussian filter (smaller = less smoothing)
 
 # Load shared tissue colors from configuration file
 def load_shared_tissue_colors():
@@ -428,14 +432,17 @@ def analyze_tissue_type(segmentation, class_id, voxel_volume_mm3=1.0):
         "average_volume": float(total_volume / num_features) if num_features > 0 else 0
     }
 
-def analyze_connected_components(segmentation, class_id, voxel_volume_mm3=1.0):
+def analyze_connected_components(segmentation, class_id, voxel_volume_mm3=1.0, apply_gaussian_filter=True, sigma=0.5):
     """
-    Analyze individual connected components for a specific class
+    Analyze individual connected components for a specific class with optional Gaussian filtering
+    for more precise volume calculations
     
     Args:
         segmentation: 3D segmentation mask
         class_id: Class ID to analyze
         voxel_volume_mm3: Volume of each voxel in mm³
+        apply_gaussian_filter: Whether to apply Gaussian filter for smoother volume calculation
+        sigma: Standard deviation for Gaussian filter (smaller values = less smoothing)
         
     Returns:
         tuple: (labeled_mask, analysis_results)
@@ -452,23 +459,48 @@ def analyze_connected_components(segmentation, class_id, voxel_volume_mm3=1.0):
             "message": f"No {TISSUE_NAMES.get(class_id, f'Class {class_id}')} regions found"
         }
     
-    # Split into connected components
-    labeled_mask, num_instances = ndimage.label(binary)
+    # Apply Gaussian filter for more precise volume calculation if requested
+    if apply_gaussian_filter:
+        logging.info(f"DEBUG: Applying Gaussian filter with sigma={sigma} for more precise volume calculation")
+        # Convert to float for filtering
+        filtered_binary = gaussian_filter(binary.astype(np.float64), sigma=sigma)
+        # Apply threshold to maintain binary nature but with smoother edges
+        # Use a slightly lower threshold to preserve volume after smoothing
+        filtered_binary = (filtered_binary > 0.3).astype(np.int32)
+        logging.info(f"DEBUG: Volume change after Gaussian filtering: {np.sum(binary)} -> {np.sum(filtered_binary)} voxels")
+    else:
+        filtered_binary = binary
+    
+    # Split into connected components using the filtered binary mask
+    labeled_mask, num_instances = ndimage.label(filtered_binary)
     
     # Analyze each instance
     regions = []
     total_volume = 0
     
     for inst_idx in range(1, num_instances + 1):
-        # Extract this instance
+        # Extract this instance from the filtered mask
         instance_mask = (labeled_mask == inst_idx)
         
-        # Calculate volume
+        # Calculate volume using the filtered mask for more precision
         voxel_count = np.sum(instance_mask)
-        volume_mm3 = voxel_count * voxel_volume_mm3
+        
+        # For Gaussian-filtered volumes, we can also calculate a weighted volume
+        # that takes into account the continuous values before thresholding
+        if apply_gaussian_filter:
+            # Get the original filtered continuous values for this region
+            filtered_continuous = gaussian_filter(binary.astype(np.float64), sigma=sigma)
+            # Calculate weighted volume (more precise than binary counting)
+            weighted_voxel_count = np.sum(filtered_continuous[instance_mask])
+            volume_mm3 = weighted_voxel_count * voxel_volume_mm3
+            logging.info(f"DEBUG: Region {inst_idx} - Binary voxels: {voxel_count}, Weighted voxels: {weighted_voxel_count:.2f}")
+        else:
+            # Standard binary volume calculation
+            volume_mm3 = voxel_count * voxel_volume_mm3
+            
         total_volume += volume_mm3
         
-        # Find centroid
+        # Find centroid using the filtered mask
         coords = np.where(instance_mask)
         if len(coords[0]) > 0:
             centroid = [float(np.mean(coords[i])) for i in range(3)]
@@ -490,7 +522,9 @@ def analyze_connected_components(segmentation, class_id, voxel_volume_mm3=1.0):
         "count": num_instances,
         "regions": regions,
         "total_volume": float(total_volume),
-        "average_volume": float(total_volume / num_instances) if num_instances > 0 else 0
+        "average_volume": float(total_volume / num_instances) if num_instances > 0 else 0,
+        "gaussian_filtered": apply_gaussian_filter,
+        "filter_sigma": sigma if apply_gaussian_filter else None
     }
 
 def generate_lesion_visualization(segmentation, original_image=None, slice_idx=None):
@@ -694,19 +728,45 @@ def analyze_segmentation(job_id):
                 "message": "No metastases detected"
             })
         
-        # Calculate volumes
-        volumes = []
-        for label in range(1, num_features + 1):
-            # Count voxels for this metastasis
-            voxel_count = np.sum(labeled_mask == label)
-            # Calculate volume in mm³
-            volume_mm3 = voxel_count * VOXEL_VOLUME_MM3
-            volumes.append(float(volume_mm3))
+        # Calculate volumes using Gaussian filtering for more precise measurement
+        logging.info("DEBUG: Using Gaussian-filtered volume calculations for improved precision")
         
-        logging.info(f"DEBUG: Calculated {len(volumes)} volumes: {volumes[:5]}")
+        # Use the enhanced analyze_connected_components function with Gaussian filtering
+        labeled_mask, analysis_results = analyze_connected_components(
+            segmentation, METASTASIS_CLASS, VOXEL_VOLUME_MM3, 
+            apply_gaussian_filter=USE_GAUSSIAN_FILTERING, sigma=GAUSSIAN_SIGMA
+        )
         
-        # Sort volumes from largest to smallest
-        volumes.sort(reverse=True)
+        if analysis_results["count"] == 0:
+            logging.info("DEBUG: No metastases found after Gaussian filtering, returning 0 count")
+            
+            # Still try to calculate confidence metrics for the overall segmentation
+            prob_path = os.path.join(RESULTS_FOLDER, f"{job_id}_probabilities.npy")
+            confidence_metrics = None
+            if os.path.exists(prob_path):
+                try:
+                    prob_maps = np.load(prob_path)
+                    confidence_metrics = calculate_confidence_metrics(prob_maps, segmentation)
+                except Exception as e:
+                    logging.warning(f"Could not calculate confidence metrics: {str(e)}")
+            
+            return jsonify({
+                "job_id": job_id,
+                "metastasis_count": 0,
+                "metastasis_volumes": [],
+                "total_volume": 0.0,
+                "confidence_metrics": confidence_metrics,
+                "message": "No metastases detected"
+            })
+        
+        # Extract volumes from the analysis results
+        volumes = [region["volume_mm3"] for region in analysis_results["regions"]]
+        num_features = analysis_results["count"]
+        
+        logging.info(f"DEBUG: Calculated {len(volumes)} Gaussian-filtered volumes: {volumes[:5]}")
+        logging.info(f"DEBUG: Total volume with Gaussian filtering: {analysis_results['total_volume']:.2f} mm³")
+        
+        # Volumes are already sorted by the analyze_connected_components function
         
         # Try to load probability maps for confidence calculation
         prob_path = os.path.join(RESULTS_FOLDER, f"{job_id}_probabilities.npy")
@@ -750,8 +810,75 @@ def analyze_segmentation(job_id):
         }), 500
 
 
-@app.route('/metastases-3d/<job_id>', methods=['GET'])
-def get_metastases_3d(job_id):
+@app.route('/test-gaussian-filtering/<job_id>', methods=['GET'])
+def test_gaussian_filtering(job_id):
+    """
+    Test endpoint to compare volume calculations with and without Gaussian filtering
+    """
+    if not job_id:
+        return jsonify({"error": "Missing job ID"}), 400
+        
+    # Validate job_id format
+    if '/' in job_id or '\\' in job_id or '..' in job_id:
+        return jsonify({"error": "Invalid job ID format"}), 400
+    
+    pred_path = os.path.join(RESULTS_FOLDER, f"{job_id}_prediction.npy")
+    
+    if not os.path.exists(pred_path):
+        return jsonify({"error": "Segmentation not found", "job_id": job_id}), 404
+    
+    try:
+        # Load segmentation
+        segmentation = np.load(pred_path)
+        logging.info(f"DEBUG: Testing Gaussian filtering for job {job_id}")
+        
+        # Calculate volumes WITHOUT Gaussian filtering (traditional method)
+        labeled_mask_traditional, results_traditional = analyze_connected_components(
+            segmentation, METASTASIS_CLASS, VOXEL_VOLUME_MM3, 
+            apply_gaussian_filter=False
+        )
+        
+        # Calculate volumes WITH Gaussian filtering (new method)
+        labeled_mask_filtered, results_filtered = analyze_connected_components(
+            segmentation, METASTASIS_CLASS, VOXEL_VOLUME_MM3, 
+            apply_gaussian_filter=True, sigma=GAUSSIAN_SIGMA
+        )
+        
+        # Compare results
+        comparison = {
+            "job_id": job_id,
+            "traditional_method": {
+                "count": results_traditional["count"],
+                "total_volume": results_traditional["total_volume"],
+                "volumes": [r["volume_mm3"] for r in results_traditional["regions"][:10]]  # First 10
+            },
+            "gaussian_filtered_method": {
+                "count": results_filtered["count"],
+                "total_volume": results_filtered["total_volume"],
+                "volumes": [r["volume_mm3"] for r in results_filtered["regions"][:10]],  # First 10
+                "sigma": results_filtered["filter_sigma"]
+            },
+            "improvements": {
+                "volume_change_mm3": results_filtered["total_volume"] - results_traditional["total_volume"],
+                "volume_change_percent": ((results_filtered["total_volume"] - results_traditional["total_volume"]) / 
+                                        results_traditional["total_volume"] * 100) if results_traditional["total_volume"] > 0 else 0,
+                "count_change": results_filtered["count"] - results_traditional["count"]
+            }
+        }
+        
+        logging.info(f"DEBUG: Gaussian filtering comparison - Traditional: {results_traditional['total_volume']:.2f} mm³, "
+                    f"Filtered: {results_filtered['total_volume']:.2f} mm³")
+        
+        return jsonify(comparison)
+        
+    except Exception as e:
+        logging.error(f"Error testing Gaussian filtering for job {job_id}: {str(e)}")
+        return jsonify({
+            "error": f"Gaussian filtering test failed: {str(e)}",
+            "job_id": job_id
+        }), 500
+
+
     """
     Get real 3D positions and volumes of metastases from segmentation mask
     """
