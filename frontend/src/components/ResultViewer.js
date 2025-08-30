@@ -585,7 +585,7 @@ const ResultViewer = ({ jobId, status, results, hidePatientEdit = false, onProce
                     <TableRow>
                       <TableCell>Metastasis Type</TableCell>
                       <TableCell align="right">Count</TableCell>
-                      <TableCell align="right">Total Volume (cm³)</TableCell>
+                      <TableCell align="right">Total Volume (mm³)</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -909,7 +909,7 @@ const ResultViewer = ({ jobId, status, results, hidePatientEdit = false, onProce
                 <TableRow>
                   <TableCell>Metastasis Type</TableCell>
                   <TableCell align="right">Count</TableCell>
-                  <TableCell align="right">Total Volume (cm³)</TableCell>
+                  <TableCell align="right">Total Volume (mm³)</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
