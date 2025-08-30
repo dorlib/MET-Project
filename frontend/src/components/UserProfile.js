@@ -342,28 +342,34 @@ const UserProfile = () => {
               </Typography>
               
               <List disablePadding>
-                <ListItem sx={{ px: 0 }}>
-                  <ListItemIcon>
-                    <VerifiedUser color={has2FAEnabled ? "success" : "disabled"} />
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary="Two-Factor Authentication" 
-                    secondary={has2FAEnabled ? "Enabled" : "Disabled"} 
-                  />
-                  {has2FAEnabled ? (
-                    <Chip 
-                      label="Enabled" 
-                      color="success" 
-                      size="small"
+                <ListItem sx={{ px: 0, flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 1 }}>
+                    <ListItemIcon>
+                      <VerifiedUser color={has2FAEnabled ? "success" : "disabled"} />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="Two-Factor Authentication" 
+                      secondary={has2FAEnabled ? "Enabled" : "Disabled"}
+                      sx={{ flex: 1 }}
                     />
-                  ) : (
-                    <Button 
-                      variant="outlined" 
-                      size="small" 
-                      onClick={() => setShow2FASetup(true)}
-                    >
-                      Enable
-                    </Button>
+                    {has2FAEnabled && (
+                      <Chip 
+                        label="Enabled" 
+                        color="success" 
+                        size="small"
+                      />
+                    )}
+                  </Box>
+                  {!has2FAEnabled && (
+                    <Box sx={{ pl: 7 }}>
+                      <Button 
+                        variant="outlined" 
+                        size="small" 
+                        onClick={() => setShow2FASetup(true)}
+                      >
+                        Enable
+                      </Button>
+                    </Box>
                   )}
                 </ListItem>
               </List>
