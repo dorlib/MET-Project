@@ -78,7 +78,7 @@ const VisualizationControls = ({
               console.log(`Updating actual slice index to: ${newValue}`);
               setSliceIndex(newValue);
             }
-          }, 150); // 150ms debounce
+          }, 50); // 50ms debounce - faster response
         };
       },
       [setSliceIndex, sliceIndex]
@@ -159,13 +159,11 @@ const VisualizationControls = ({
                 onChange={(e, value) => {
                   // Update local state immediately for responsive UI
                   setLocalSliceIndex(value);
-                  // Debounce the actual state update to limit API calls
-                  debouncedSetSliceIndex(value);
+                  // No debounced call - only update when dragging stops
                 }}
                 onChangeCommitted={(e, value) => {
-                  // Ensure the final position is applied
+                  // Only trigger API call when user finishes dragging
                   console.log(`Slider final position: ${value}`);
-                  // Force update the real state when dragging ends
                   setSliceIndex(value);
                 }}
                 sx={{ width: '150px', mx: 1 }}

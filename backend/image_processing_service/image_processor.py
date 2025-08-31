@@ -40,6 +40,56 @@ from fixed_high_res_viz import create_side_by_side_visualization, create_side_by
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# Simple cache for 3D volumes to speed up slice navigation
+VOLUME_CACHE = {}
+CACHE_SIZE_LIMIT = 3  # Keep only 3 volumes in memory to prevent memory issues
+
+# Cache for pre-rendered images - this is the real performance boost
+IMAGE_CACHE = {}
+IMAGE_CACHE_SIZE_LIMIT = 100  # Keep 100 rendered images in memory
+
+def get_cache_key(job_id, viz_type, slice_idx, viewType, quality, upscale, enhance_contrast, enhance_edges):
+    """Generate a unique cache key for rendered images"""
+    return f"{job_id}_{viz_type}_{slice_idx}_{viewType}_{quality}_{upscale}_{enhance_contrast}_{enhance_edges}"
+
+def get_cached_image(cache_key):
+    """Get rendered image from cache"""
+    if cache_key in IMAGE_CACHE:
+        logging.info(f"Using cached rendered image for {cache_key}")
+        return IMAGE_CACHE[cache_key]
+    return None
+
+def cache_rendered_image(cache_key, image_data):
+    """Cache a rendered image"""
+    # Remove oldest images if cache is full
+    if len(IMAGE_CACHE) >= IMAGE_CACHE_SIZE_LIMIT:
+        oldest_key = next(iter(IMAGE_CACHE))
+        del IMAGE_CACHE[oldest_key]
+        logging.info(f"Removed oldest cached image {oldest_key}")
+    
+    IMAGE_CACHE[cache_key] = image_data
+    logging.info(f"Cached rendered image {cache_key}")
+
+def get_cached_volume(file_path):
+    """Get volume from cache or load from disk and cache it"""
+    if file_path in VOLUME_CACHE:
+        logging.info(f"Using cached volume for {file_path}")
+        return VOLUME_CACHE[file_path]
+    
+    # Load from disk
+    volume = load_volume_data(file_path)
+    
+    # Cache management - remove oldest if cache is full
+    if len(VOLUME_CACHE) >= CACHE_SIZE_LIMIT:
+        oldest_key = next(iter(VOLUME_CACHE))
+        del VOLUME_CACHE[oldest_key]
+        logging.info(f"Removed {oldest_key} from cache")
+    
+    # Add to cache
+    VOLUME_CACHE[file_path] = volume
+    logging.info(f"Cached volume for {file_path}")
+    return volume
+
 RESULTS_FOLDER = '/app/results'
 METASTASIS_CLASS = 3  # Class 3 is for metastasis/tumor core in the model output
 EDEMA_CLASS = 2       # Class 2 is for edema
@@ -1407,9 +1457,9 @@ def get_visualization(job_id):
         return jsonify({"error": "Segmentation not found"}), 404
     
     try:
-        # Load the segmentation mask
+        # Load the segmentation mask using cache for faster slice navigation
         logging.info(f"Loading segmentation from {pred_path} for visualization")
-        segmentation = load_volume_data(pred_path)
+        segmentation = get_cached_volume(pred_path)
         logging.info(f"Segmentation loaded successfully. Shape: {segmentation.shape}, Unique values: {np.unique(segmentation)}")
         
         # Load original image if available
@@ -1417,7 +1467,7 @@ def get_visualization(job_id):
         if os.path.exists(orig_path):
             try:
                 logging.info(f"Loading original image from {orig_path}")
-                original_image = load_volume_data(orig_path)
+                original_image = get_cached_volume(orig_path)
                 logging.info(f"Original image loaded successfully. Shape: {original_image.shape}")
             except Exception as e:
                 logging.warning(f"Could not load original image: {str(e)}")
@@ -1443,6 +1493,34 @@ def get_visualization(job_id):
             else:
                 logging.info(f"Using provided slice index: {slice_idx}")
         
+        # Get quality parameter, default to high resolution
+        quality = request.args.get('quality', 'high')
+        upscale_factor = float(request.args.get('upscale', '1.0'))
+        upscale_factor = min(max(upscale_factor, 1.0), 2.0)
+        contrast_enhancement = request.args.get('enhance_contrast', 'true').lower() == 'true'
+        edge_enhancement = request.args.get('enhance_edges', 'true').lower() == 'true'
+        view_type = request.args.get('view_type', 'axial')
+        
+        # Generate cache key for this specific visualization request
+        cache_key = get_cache_key(job_id, viz_type, slice_idx, view_type, quality, upscale_factor, contrast_enhancement, edge_enhancement)
+        logging.info(f"Generated cache key: {cache_key}")
+        
+        # Try to get cached image first
+        cached_image_data = get_cached_image(cache_key)
+        if cached_image_data:
+            logging.info(f"Cache HIT! Using cached image for {cache_key}")
+            # Return cached image directly
+            cached_io = io.BytesIO(cached_image_data)
+            cached_io.seek(0)
+            return send_file(
+                cached_io, 
+                mimetype='image/png',
+                as_attachment=False,
+                download_name=f"{job_id}_{viz_type}.png"
+            )
+        else:
+            logging.info(f"Cache MISS. Will generate and cache image for {cache_key}")
+        
         # Generate the appropriate visualization based on type
         if viz_type == 'slice':
             # Additional bounds check for safety
@@ -1452,8 +1530,6 @@ def get_visualization(job_id):
                 
             # Use high resolution visualization for slice type
             try:
-                # Get quality parameter, default to high resolution
-                quality = request.args.get('quality', 'high')
                 logging.info(f"Using visualization quality: {quality}")
                 
                 if quality == 'standard':
@@ -1461,20 +1537,6 @@ def get_visualization(job_id):
                     logging.info("Using standard visualization method")
                     image = create_colormap_visualization(segmentation, original_image, slice_idx)
                 else:
-                    # Parse additional enhancement options from request parameters
-                    try:
-                        upscale_factor = float(request.args.get('upscale', '1.0'))
-                        # Limit upscale factor to reasonable values
-                        upscale_factor = min(max(upscale_factor, 1.0), 2.0)
-                    except (ValueError, TypeError):
-                        upscale_factor = 1.0
-                        
-                    # Parse boolean options
-                    contrast_enhancement = request.args.get('enhance_contrast', 'true').lower() == 'true'
-                    edge_enhancement = request.args.get('enhance_edges', 'true').lower() == 'true'
-                    
-                    # Get view type (axial, coronal, sagittal)
-                    view_type = request.args.get('view_type', 'axial')
                     if view_type not in ['axial', 'coronal', 'sagittal']:
                         logging.warning(f"Invalid view_type: {view_type}, defaulting to axial")
                         view_type = 'axial'
@@ -1540,6 +1602,13 @@ def get_visualization(job_id):
         # Convert to PNG and send
         img_io = io.BytesIO()
         image.save(img_io, 'PNG')
+        img_io.seek(0)
+        
+        # Cache the rendered image for future requests
+        image_data = img_io.getvalue()
+        cache_rendered_image(cache_key, image_data)
+        
+        # Reset stream position for sending
         img_io.seek(0)
         
         return send_file(
