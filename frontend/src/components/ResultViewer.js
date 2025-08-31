@@ -23,7 +23,7 @@ import {
 } from '@mui/material';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, Legend } from 'chart.js';
-import VolumetricVisualization3D from './VolumetricVisualization3D';
+import Enhanced3DVisualization from './Enhanced3DVisualization';
 import VisualizationControls from './VisualizationControls';
 import ColorbarOverlay from './ColorbarOverlay';
 import { PictureAsPdf, TableChart, Person, Save, Visibility, VisibilityOff } from '@mui/icons-material';
@@ -708,7 +708,7 @@ const ResultViewer = ({ jobId, status, results, hidePatientEdit = false, onProce
       </Tabs>
       
       {tabValue === 0 && (
-        <VolumetricVisualization3D 
+        <Enhanced3DVisualization 
           jobId={jobId} 
           result={results}
         />

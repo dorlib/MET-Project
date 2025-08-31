@@ -232,6 +232,12 @@ def process_prediction_sync(file_path: str, job_id: str):
         # Check scan shape
         logger.info(f"Scan shape: {scan.shape}")
         
+        # IMPORTANT: Preserve the original scan for 3D visualization background
+        original_path = os.path.join(RESULTS_DIR, f"{job_id}_original.npy")
+        if not os.path.exists(original_path):  # Only save if not already saved
+            np.save(original_path, scan)
+            logger.info(f"Preserved original scan to {original_path} with shape {scan.shape}")
+        
         # Use dummy prediction for testing if model can't be loaded
         use_dummy_prediction = False
         

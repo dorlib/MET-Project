@@ -1085,7 +1085,7 @@ def get_brain_volume_3d(job_id):
 def get_volumetric_3d(job_id):
     """
     Get real volumetric 3D data from original brain scan and segmentation
-    Returns downsampled volume slices for 3D visualization
+    Returns comprehensive 3D data with connected component analysis like napari visualization
     """
     logging.info(f"DEBUG: get_volumetric_3d called with job_id: {job_id}")
     
@@ -1103,81 +1103,189 @@ def get_volumetric_3d(job_id):
         return jsonify({"error": "Segmentation not found", "job_id": job_id}), 404
     
     try:
-        # Load segmentation
-        segmentation = np.load(pred_path)
-        logging.info(f"DEBUG: Segmentation loaded. Shape: {segmentation.shape}")
+        # Load segmentation (prediction)
+        prediction = np.load(pred_path)
+        logging.info(f"DEBUG: Prediction loaded. Shape: {prediction.shape}")
         
-        # Load original brain scan if available
+        # Load original brain scan if available  
         original_image = None
         if os.path.exists(orig_path):
             original_image = np.load(orig_path)
             logging.info(f"DEBUG: Original image loaded. Shape: {original_image.shape}")
-        
-        # Downsample for 3D visualization (every 4th slice)
-        downsample_factor = 4
-        downsampled_indices = list(range(0, segmentation.shape[0], downsample_factor))
-        
-        # Extract volumetric slices
-        volume_slices = []
-        for i, slice_idx in enumerate(downsampled_indices[:20]):  # Limit to 20 slices
-            # Get brain slice
-            brain_slice = None
-            if original_image is not None:
-                brain_slice = original_image[slice_idx, :, :].astype(np.float32)
-                # Normalize to 0-1
-                brain_min, brain_max = brain_slice.min(), brain_slice.max()
-                if brain_max > brain_min:
-                    brain_slice = (brain_slice - brain_min) / (brain_max - brain_min)
-                
-                # Further downsample spatial dimensions for performance
-                brain_slice = brain_slice[::2, ::2]  # 2x spatial downsample
             
-            # Get segmentation slice
-            seg_slice = segmentation[slice_idx, :, :].astype(np.uint8)
-            seg_slice = seg_slice[::2, ::2]  # 2x spatial downsample to match brain
-            
-            volume_slices.append({
-                "slice_index": slice_idx,
-                "z_position": slice_idx / segmentation.shape[0],  # Normalized Z position
-                "brain_data": brain_slice.tolist() if brain_slice is not None else None,
-                "segmentation_data": seg_slice.tolist(),
-                "shape": brain_slice.shape if brain_slice is not None else seg_slice.shape
-            })
+        # Handle one-hot encoded predictions
+        if prediction.ndim == 4 and prediction.shape[-1] > 1:
+            prediction = np.argmax(prediction, axis=-1)
+        if original_image is not None and original_image.ndim == 4:
+            original_image = np.argmax(original_image, axis=-1) if original_image.shape[-1] > 1 else original_image.squeeze()
         
-        # Get metastases for overlay
-        metastases_3d = []
-        met_mask = (segmentation == METASTASIS_CLASS)
-        if np.any(met_mask):
-            labeled_mask, analysis_results = analyze_connected_components(
-                segmentation, METASTASIS_CLASS, VOXEL_VOLUME_MM3
-            )
-            
-            for region in analysis_results.get("regions", []):
-                z, y, x = region["centroid"]
-                # Normalize coordinates to match volume slices
-                z_norm = z / segmentation.shape[0]
-                y_norm = y / segmentation.shape[1]
-                x_norm = x / segmentation.shape[2]
-                
-                metastases_3d.append({
-                    "id": region["id"],
-                    "position": [float(x_norm), float(y_norm), float(z_norm)],
-                    "volume": region["volume_mm3"],
-                    "voxel_count": region["voxel_count"]
-                })
+        prediction = prediction.astype(np.uint8)
+        if original_image is not None:
+            original_image = original_image.astype(np.float32)
         
-        result = {
-            "job_id": job_id,
-            "volume_slices": volume_slices,
-            "metastases": metastases_3d,
-            "original_shape": segmentation.shape,
-            "downsample_factor": downsample_factor,
-            "has_brain_data": original_image is not None,
-            "slice_count": len(volume_slices),
-            "metastases_count": len(metastases_3d)
+        # Get volume and shape information
+        voxel_spacing = (1.0, 1.0, 1.0)  # Default spacing
+        voxel_vol_mm3 = np.prod(voxel_spacing)
+        
+        # Get unique labels
+        labels = np.unique(prediction)
+        logging.info(f"DEBUG: Classes in prediction: {labels}")
+        
+        # Class name mapping
+        name_map = {
+            0: "Background",
+            1: "Metastasis", 
+            2: "Edema",
+            3: "Tumor core"
         }
         
-        logging.info(f"DEBUG: Volumetric 3D data prepared - {len(volume_slices)} slices, {len(metastases_3d)} metastases")
+        # Define colors for each class (RGBA normalized 0-1)
+        color_map = {
+            0: [0.0, 0.0, 0.0, 0.0],      # Transparent background
+            1: [1.0, 0.0, 0.0, 0.6],      # Red for metastasis
+            2: [0.0, 1.0, 0.0, 0.6],      # Green for edema  
+            3: [0.0, 0.0, 1.0, 0.6],      # Blue for tumor core
+        }
+        
+        # Process each tissue class
+        tissue_layers = []
+        connected_components = {}
+        
+        # Global downsample settings for consistency
+        downsample_z = 4  # Every 4th slice 
+        downsample_spatial = 4  # Every 4th pixel
+        
+        for class_label in labels:
+            if class_label == 0:
+                continue  # Skip background
+                
+            class_name = name_map.get(class_label, f"Class_{class_label}")
+            
+            # Get binary mask for this class
+            binary_mask = (prediction == class_label).astype(np.uint8)
+            
+            if not np.any(binary_mask):
+                continue
+                
+            # Analyze connected components using scipy.ndimage
+            from scipy import ndimage
+            cc_map, num_instances = ndimage.label(binary_mask)
+            
+            logging.info(f"DEBUG: Class {class_name}: {num_instances} connected component(s)")
+            
+            # Downsample the mask for web delivery 
+            downsampled_mask = binary_mask[::downsample_z, ::downsample_spatial, ::downsample_spatial]
+            
+            # Convert to simple list format - ensure all values are Python ints, not numpy types
+            mask_data_serializable = []
+            for z in range(downsampled_mask.shape[0]):
+                slice_data = []
+                for y in range(downsampled_mask.shape[1]):
+                    row_data = [int(downsampled_mask[z, y, x]) for x in range(downsampled_mask.shape[2])]
+                    slice_data.append(row_data)
+                mask_data_serializable.append(slice_data)
+            
+            # Store tissue layer information
+            tissue_layer = {
+                "class_id": int(class_label),
+                "class_name": class_name,
+                "color": color_map.get(class_label, [1.0, 1.0, 0.0, 0.6]),
+                "total_instances": int(num_instances),
+                "mask_shape": [int(x) for x in downsampled_mask.shape],
+                "mask_data": mask_data_serializable,  # Now properly serializable
+                "downsample_factors": [int(downsample_z), int(downsample_spatial), int(downsample_spatial)]
+            }
+            
+            # Analyze individual instances
+            instances = []
+            for inst_idx in range(1, num_instances + 1):
+                instance_mask = (cc_map == inst_idx)
+                
+                # Calculate volume
+                voxel_count = int(instance_mask.sum())
+                volume_mm3 = voxel_count * voxel_vol_mm3
+                
+                # Calculate centroid
+                z_coords, y_coords, x_coords = np.where(instance_mask)
+                if len(z_coords) > 0:
+                    centroid = [
+                        float(np.mean(z_coords)),
+                        float(np.mean(y_coords)), 
+                        float(np.mean(x_coords))
+                    ]
+                    
+                    # Normalized coordinates
+                    centroid_norm = [
+                        float(centroid[0] / prediction.shape[0]),
+                        float(centroid[1] / prediction.shape[1]),
+                        float(centroid[2] / prediction.shape[2])
+                    ]
+                    
+                    instances.append({
+                        "instance_id": int(inst_idx),
+                        "voxel_count": int(voxel_count),
+                        "volume_mm3": float(volume_mm3),
+                        "centroid": centroid,
+                        "centroid_normalized": centroid_norm
+                    })
+                    
+                    logging.info(f"  • {class_name}_{inst_idx}: {voxel_count} voxels ({volume_mm3:.2f} mm³)")
+            
+            tissue_layer["instances"] = instances
+            tissue_layers.append(tissue_layer)
+            connected_components[int(class_label)] = instances
+        
+        # Prepare brain image data (downsampled)
+        brain_volume_data = None
+        if original_image is not None:
+            # Normalize brain data
+            brain_min, brain_max = original_image.min(), original_image.max()
+            if brain_max > brain_min:
+                normalized_brain = (original_image - brain_min) / (brain_max - brain_min)
+            else:
+                normalized_brain = original_image
+                
+            # Downsample brain volume (more aggressive to reduce size)
+            downsample_z_brain = 4
+            downsample_spatial_brain = 4
+            brain_downsampled = normalized_brain[::downsample_z_brain, ::downsample_spatial_brain, ::downsample_spatial_brain]
+            
+            # Convert to serializable format
+            brain_data_serializable = []
+            for z in range(brain_downsampled.shape[0]):
+                slice_data = []
+                for y in range(brain_downsampled.shape[1]):
+                    row_data = [float(brain_downsampled[z, y, x]) for x in range(brain_downsampled.shape[2])]
+                    slice_data.append(row_data)
+                brain_data_serializable.append(slice_data)
+                
+            brain_volume_data = {
+                "shape": [int(x) for x in brain_downsampled.shape],
+                "data": brain_data_serializable,
+                "downsample_factors": [int(downsample_z_brain), int(downsample_spatial_brain), int(downsample_spatial_brain)],
+                "normalized": True
+            }
+        
+        # Prepare comprehensive result
+        result = {
+            "job_id": job_id,
+            "original_shape": [int(x) for x in prediction.shape],
+            "voxel_spacing": [float(x) for x in voxel_spacing],
+            "has_brain_data": original_image is not None,
+            "brain_volume": brain_volume_data,
+            "tissue_layers": tissue_layers,
+            "connected_components": connected_components,
+            "class_names": {str(k): v for k, v in name_map.items()},
+            "color_mapping": {str(k): v for k, v in color_map.items()},
+            "total_classes": int(len([l for l in labels if l != 0])),
+            "downsample_info": {
+                "z_factor": int(downsample_z),
+                "spatial_factor": int(downsample_spatial),
+                "description": f"Downsampled by {downsample_z}x in Z, {downsample_spatial}x spatially for web delivery"
+            }
+        }
+        
+        logging.info(f"DEBUG: Enhanced 3D data prepared - {len(tissue_layers)} tissue layers with connected components")
         
         return jsonify(result)
         
@@ -1187,6 +1295,18 @@ def get_volumetric_3d(job_id):
             "error": f"Volumetric 3D failed: {str(e)}",
             "job_id": job_id
         }), 500
+
+@app.route('/test-3d/<job_id>', methods=['GET'])
+def test_3d(job_id):
+    """Simple test endpoint for debugging"""
+    try:
+        return jsonify({
+            "job_id": job_id,
+            "status": "success",
+            "message": "Test endpoint working"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/advanced-analysis/<job_id>', methods=['GET'])
 def advanced_analysis(job_id):
