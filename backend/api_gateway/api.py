@@ -683,6 +683,37 @@ def refresh_token():
         logging.error(f"Error refreshing token: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/auth/password-requirements', methods=['GET'])
+def get_password_requirements():
+    """
+    Get password requirements for frontend validation
+    """
+    try:
+        response = requests.get(f"{USER_SERVICE_URL}/password-requirements")
+        return response.json(), response.status_code
+        
+    except Exception as e:
+        logging.error(f"Error getting password requirements: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/auth/validate-password', methods=['POST'])
+def validate_password():
+    """
+    Validate password strength
+    """
+    try:
+        response = requests.post(
+            f"{USER_SERVICE_URL}/validate-password",
+            json=request.json,
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        return response.json(), response.status_code
+        
+    except Exception as e:
+        logging.error(f"Error validating password: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/user/profile', methods=['GET'])
 @token_required
 def get_profile():

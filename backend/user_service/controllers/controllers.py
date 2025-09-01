@@ -4,6 +4,7 @@ import logging
 from sqlalchemy.orm import Session
 from utils.database import get_db
 from utils.jwt_util import verify_token
+from utils.password_validator import PasswordValidator
 from services.services import UserService, ScanService
 from models.models import Scan
 
@@ -77,6 +78,26 @@ def login():
         }), result["status_code"]
     else:
         return jsonify({"error": result["error"]}), result["status_code"]
+
+@auth_bp.route('/password-requirements', methods=['GET'])
+def get_password_requirements():
+    """Get password requirements for frontend validation."""
+    requirements = PasswordValidator.get_password_requirements()
+    return jsonify(requirements), 200
+
+@auth_bp.route('/validate-password', methods=['POST'])
+def validate_password():
+    """Validate password strength without registering."""
+    data = request.json
+    
+    if not data or 'password' not in data:
+        return jsonify({"error": "Password is required"}), 400
+    
+    password = data['password']
+    email = data.get('email')  # Optional email for additional validation
+    
+    validation_result = PasswordValidator.validate_password(password, email)
+    return jsonify(validation_result), 200
 
 # User endpoints
 @user_bp.route('/user', methods=['GET'])

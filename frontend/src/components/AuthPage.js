@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import TwoFactorVerification from './TwoFactorVerification';
+import PasswordStrengthIndicator from './PasswordStrengthIndicator';
 
 const Login = ({ onToggleForm }) => {
   const [email, setEmail] = useState('');
@@ -139,6 +140,7 @@ const Signup = ({ onToggleForm }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [formError, setFormError] = useState('');
+  const [passwordValidation, setPasswordValidation] = useState(null);
   const { register, loading } = useAuth();
 
   const handleSubmit = async (e) => {
@@ -153,6 +155,12 @@ const Signup = ({ onToggleForm }) => {
 
     if (password !== confirmPassword) {
       setFormError('Passwords do not match');
+      return;
+    }
+
+    // Check password strength
+    if (!passwordValidation?.is_valid) {
+      setFormError('Please ensure your password meets all requirements');
       return;
     }
 
@@ -213,6 +221,12 @@ const Signup = ({ onToggleForm }) => {
             required
           />
           
+          <PasswordStrengthIndicator
+            password={password}
+            onValidationChange={setPasswordValidation}
+            showRequirements={true}
+          />
+          
           <TextField
             label="Confirm Password"
             type="password"
@@ -229,13 +243,18 @@ const Signup = ({ onToggleForm }) => {
           <Button
             type="submit"
             variant="contained"
-            color="primary"
             fullWidth
-            size="large"
-            sx={{ mt: 3, mb: 2 }}
-            disabled={loading}
+            sx={{ 
+              mt: 3, 
+              mb: 2,
+              backgroundColor: passwordValidation?.is_valid ? 'primary.main' : 'grey.400',
+              '&:hover': {
+                backgroundColor: passwordValidation?.is_valid ? 'primary.dark' : 'grey.500',
+              }
+            }}
+            disabled={loading || !passwordValidation?.is_valid}
           >
-            {loading ? 'Creating account...' : 'Sign Up'}
+            {loading ? <CircularProgress size={24} /> : 'Create Account'}
           </Button>
         </form>
         

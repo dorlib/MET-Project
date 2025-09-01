@@ -5,13 +5,25 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from repositories.repositories import UserRepository, ScanRepository
 from utils.jwt_util import generate_token
+from utils.password_validator import PasswordValidator
 
 class UserService:
     @staticmethod
     def register_user(db: Session, email: str, name: str, password: str) -> Dict:
         """
-        Register a new user
+        Register a new user with password validation
         """
+        # Validate password first
+        password_validation = PasswordValidator.validate_password(password, email)
+        if not password_validation["is_valid"]:
+            return {
+                "success": False,
+                "error": "Password does not meet security requirements",
+                "password_errors": password_validation["errors"],
+                "password_warnings": password_validation.get("warnings", []),
+                "status_code": 400
+            }
+        
         # Check if user already exists
         existing_user = UserRepository.get_user_by_email(db, email)
         if existing_user:
