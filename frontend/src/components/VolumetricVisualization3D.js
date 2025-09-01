@@ -124,51 +124,73 @@ const VolumetricVisualization3D = ({ jobId, result }) => {
       
       const [height, width] = sliceShape;
       
-      // Create canvas for this slice
+      // Create slice canvas with improved resolution for better anatomy
+      const upscale = 2; // Render at higher resolution
       const sliceCanvas = document.createElement('canvas');
-      sliceCanvas.width = width;
-      sliceCanvas.height = height;
+      sliceCanvas.width = width * upscale;
+      sliceCanvas.height = height * upscale;
       const sliceCtx = sliceCanvas.getContext('2d');
+      sliceCtx.imageSmoothingEnabled = true;
+      sliceCtx.imageSmoothingQuality = 'high';
       
-      // Create ImageData for the slice
-      const imageData = sliceCtx.createImageData(width, height);
+      // Create ImageData for the slice at higher resolution
+      const imageData = sliceCtx.createImageData(width * upscale, height * upscale);
       const data = imageData.data;
       
-      // Render brain data as grayscale background
+      // Render brain data with enhanced anatomy preservation
       if (slice.brain_data && brainIntensity > 0) {
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
-            const idx = y * width + x;
-            const pixelIdx = idx * 4;
+            const originalValue = slice.brain_data[y][x];
             
-            const brainValue = slice.brain_data[y][x] * brainIntensity * 255;
-            data[pixelIdx] = brainValue;     // R
-            data[pixelIdx + 1] = brainValue; // G  
-            data[pixelIdx + 2] = brainValue; // B
-            data[pixelIdx + 3] = 255 * opacity; // A
+            if (originalValue > 0.02) { // Lower threshold for better anatomy
+              // Apply gamma correction for better brain tissue contrast
+              const enhancedValue = Math.pow(originalValue, 0.8);
+              const brainValue = enhancedValue * brainIntensity * 255;
+              
+              // Render at higher resolution
+              for (let dy = 0; dy < upscale; dy++) {
+                for (let dx = 0; dx < upscale; dx++) {
+                  const upY = y * upscale + dy;
+                  const upX = x * upscale + dx;
+                  const pixelIdx = (upY * width * upscale + upX) * 4;
+                  
+                  data[pixelIdx] = brainValue;     // R
+                  data[pixelIdx + 1] = brainValue; // G  
+                  data[pixelIdx + 2] = brainValue; // B
+                  data[pixelIdx + 3] = 255 * opacity; // A
+                }
+              }
+            }
           }
         }
       }
       
-      // Overlay segmentation data with categorical colors
+      // Overlay segmentation data with categorical colors at higher resolution
       if (slice.segmentation_data && showSegmentation) {
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
-            const idx = y * width + x;
-            const pixelIdx = idx * 4;
-            
             const segValue = slice.segmentation_data[y][x];
             
             if (segValue > 0 && TISSUE_COLORS[segValue]) {
               const color = TISSUE_COLORS[segValue].color;
-              // Blend with existing brain data
               const alpha = color[3] / 255;
               const invAlpha = 1 - alpha;
               
-              data[pixelIdx] = data[pixelIdx] * invAlpha + color[0] * alpha;     // R
-              data[pixelIdx + 1] = data[pixelIdx + 1] * invAlpha + color[1] * alpha; // G
-              data[pixelIdx + 2] = data[pixelIdx + 2] * invAlpha + color[2] * alpha; // B
-              data[pixelIdx + 3] = Math.max(data[pixelIdx + 3], color[3] * opacity); // A
+              // Render at higher resolution
+              for (let dy = 0; dy < upscale; dy++) {
+                for (let dx = 0; dx < upscale; dx++) {
+                  const upY = y * upscale + dy;
+                  const upX = x * upscale + dx;
+                  const pixelIdx = (upY * width * upscale + upX) * 4;
+                  
+                  // Blend with existing brain data
+                  data[pixelIdx] = data[pixelIdx] * invAlpha + color[0] * alpha;     // R
+                  data[pixelIdx + 1] = data[pixelIdx + 1] * invAlpha + color[1] * alpha; // G
+                  data[pixelIdx + 2] = data[pixelIdx + 2] * invAlpha + color[2] * alpha; // B
+                  data[pixelIdx + 3] = Math.max(data[pixelIdx + 3], color[3] * opacity); // A
+                }
+              }
             }
           }
         }
@@ -206,8 +228,8 @@ const VolumetricVisualization3D = ({ jobId, result }) => {
         const p2 = projectedCorners[3];
         
         // Simple perspective transform (not perfect but good enough)
-        const scaleX = (p1.x - p0.x) / width;
-        const scaleY = (p2.y - p0.y) / height;
+        const scaleX = (p1.x - p0.x) / (width * upscale);
+        const scaleY = (p2.y - p0.y) / (height * upscale);
         
         ctx.setTransform(scaleX, 0, 0, scaleY, p0.x, p0.y);
         ctx.drawImage(sliceCanvas, 0, 0);

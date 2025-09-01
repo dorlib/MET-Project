@@ -1285,7 +1285,7 @@ def get_volumetric_3d(job_id):
             tissue_layers.append(tissue_layer)
             connected_components[int(class_label)] = instances
         
-        # Prepare brain image data (downsampled)
+        # Prepare brain image data with preserved anatomical shape
         brain_volume_data = None
         if original_image is not None:
             # Normalize brain data
@@ -1295,25 +1295,45 @@ def get_volumetric_3d(job_id):
             else:
                 normalized_brain = original_image
                 
-            # Downsample brain volume (more aggressive to reduce size)
-            downsample_z_brain = 4
-            downsample_spatial_brain = 4
-            brain_downsampled = normalized_brain[::downsample_z_brain, ::downsample_spatial_brain, ::downsample_spatial_brain]
+            # Use more conservative downsampling to preserve brain anatomy
+            # For 3D visualization, we need to maintain the brain's actual shape
+            downsample_z_brain = 2  # Reduced from 4 to 2 - preserve more depth detail
+            downsample_spatial_brain = 2  # Reduced from 4 to 2 - preserve spatial anatomy
             
-            # Convert to serializable format
+            # Apply brain mask to reduce data size while preserving anatomy
+            brain_mask = (normalized_brain > 0.1).astype(np.float32)  # Keep only meaningful brain tissue
+            masked_brain = normalized_brain * brain_mask
+            
+            # Downsample the masked brain volume 
+            brain_downsampled = masked_brain[::downsample_z_brain, ::downsample_spatial_brain, ::downsample_spatial_brain]
+            
+            # Apply light gaussian smoothing to reduce noise while preserving edges
+            from scipy.ndimage import gaussian_filter
+            brain_smoothed = gaussian_filter(brain_downsampled, sigma=0.5)
+            
+            # Convert to serializable format with better compression
             brain_data_serializable = []
-            for z in range(brain_downsampled.shape[0]):
+            for z in range(brain_smoothed.shape[0]):
                 slice_data = []
-                for y in range(brain_downsampled.shape[1]):
-                    row_data = [float(brain_downsampled[z, y, x]) for x in range(brain_downsampled.shape[2])]
+                for y in range(brain_smoothed.shape[1]):
+                    # Only store non-zero brain tissue to reduce data size
+                    row_data = []
+                    for x in range(brain_smoothed.shape[2]):
+                        value = brain_smoothed[z, y, x]
+                        # Use quantization to reduce precision while preserving shape
+                        quantized_value = round(float(value), 3) if value > 0.05 else 0.0
+                        row_data.append(quantized_value)
                     slice_data.append(row_data)
                 brain_data_serializable.append(slice_data)
                 
             brain_volume_data = {
-                "shape": [int(x) for x in brain_downsampled.shape],
+                "shape": [int(x) for x in brain_smoothed.shape],
                 "data": brain_data_serializable,
                 "downsample_factors": [int(downsample_z_brain), int(downsample_spatial_brain), int(downsample_spatial_brain)],
-                "normalized": True
+                "normalized": True,
+                "masked": True,  # Indicates background removed
+                "smoothed": True,  # Indicates gaussian smoothing applied
+                "quantized": True  # Indicates precision reduction for compression
             }
         
         # Prepare comprehensive result

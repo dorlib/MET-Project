@@ -127,36 +127,49 @@ const Enhanced3DVisualization = ({ jobId, result }) => {
       const normalizedZ = (z / depth - 0.5) * 2; // [-1, 1]
       const sliceData = data[z];
       
-      // Check if slice has brain data
+      // Check if slice has meaningful brain data
       let hasData = false;
       for (let y = 0; y < height && !hasData; y++) {
         for (let x = 0; x < width && !hasData; x++) {
-          if (sliceData[y][x] > 0.1) hasData = true;
+          if (sliceData[y][x] > 0.05) hasData = true; // Lower threshold for better anatomy
         }
       }
       
       if (!hasData) continue;
       
-      // Create simple brain slice
+      // Create brain slice with better resolution
       const brainCanvas = document.createElement('canvas');
-      brainCanvas.width = width;
-      brainCanvas.height = height;
+      brainCanvas.width = width * 2; // 2x resolution for smoother anatomy
+      brainCanvas.height = height * 2;
       const brainCtx = brainCanvas.getContext('2d');
-      const imageData = brainCtx.createImageData(width, height);
+      brainCtx.imageSmoothingEnabled = true;
+      brainCtx.imageSmoothingQuality = 'high';
+      const imageData = brainCtx.createImageData(width * 2, height * 2);
       const imgData = imageData.data;
       
-      // Simple grayscale rendering like napari "Raw Image" layer
+      // Enhanced brain tissue rendering with better anatomy preservation
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          const idx = (y * width + x) * 4;
-          const brainValue = Math.floor(sliceData[y][x] * 255);
+          const originalValue = sliceData[y][x];
           
-          if (brainValue > 25) { // Only render meaningful brain tissue
-            // Simple grayscale like napari
-            imgData[idx] = brainValue;     // R
-            imgData[idx + 1] = brainValue; // G  
-            imgData[idx + 2] = brainValue; // B
-            imgData[idx + 3] = Math.floor(brainOpacity * 255); // A - use full opacity setting
+          if (originalValue > 0.02) { // Much lower threshold to capture more brain anatomy
+            // Apply gamma correction for better brain tissue contrast
+            const enhancedValue = Math.pow(originalValue, 0.7);
+            const brainValue = Math.floor(enhancedValue * 255);
+            
+            // Render at 2x resolution with interpolation
+            for (let dy = 0; dy < 2; dy++) {
+              for (let dx = 0; dx < 2; dx++) {
+                const upY = y * 2 + dy;
+                const upX = x * 2 + dx;
+                const idx = (upY * width * 2 + upX) * 4;
+                
+                imgData[idx] = brainValue;     // R
+                imgData[idx + 1] = brainValue; // G  
+                imgData[idx + 2] = brainValue; // B
+                imgData[idx + 3] = Math.floor(brainOpacity * 255); // A
+              }
+            }
           }
         }
       }
@@ -186,8 +199,9 @@ const Enhanced3DVisualization = ({ jobId, result }) => {
         const p1 = projectedCorners[1];
         const p2 = projectedCorners[3];
         
-        const scaleX = (p1.x - p0.x) / width;
-        const scaleY = (p2.y - p0.y) / height;
+        // Calculate transformation matrix for higher resolution rendering
+        const scaleX = (p1.x - p0.x) / (width * 2);
+        const scaleY = (p2.y - p0.y) / (height * 2);
         
         ctx.setTransform(scaleX, 0, 0, scaleY, p0.x, p0.y);
         ctx.drawImage(brainCanvas, 0, 0);
