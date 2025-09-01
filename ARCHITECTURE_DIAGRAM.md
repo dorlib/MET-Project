@@ -28,7 +28,7 @@ graph TB
 
     %% Database Layer
     subgraph "Database Layer"
-        MYSQL[(🗄️ MySQL Database<br/>User Data<br/>Scan Metadata<br/>Patient Records<br/>Port: 13306)]
+        MYSQL[("🗄️ MySQL Database<br/>User Data<br/>Scan Metadata<br/>Patient Records<br/>Port: 13306")]
     end
 
     %% Storage Layer
@@ -40,7 +40,7 @@ graph TB
 
     %% External Services
     subgraph "External"
-        DICOM[🏥 DICOM Systems<br/>(Future Integration)]
+        DICOM["🏥 DICOM Systems<br/>Future Integration"]
     end
 
     %% User Flow Connections
@@ -49,10 +49,10 @@ graph TB
     NGINX --> API_GW
 
     %% API Gateway Routes
-    API_GW -->|/auth/*| USER_SVC
-    API_GW -->|/upload, /models/*| MODEL_SVC
-    API_GW -->|/analyze/*, /visualization/*| IMG_PROC
-    API_GW -->|/user/*, /scans/*| USER_SVC
+    API_GW -->|"auth endpoints"| USER_SVC
+    API_GW -->|"upload, models"| MODEL_SVC
+    API_GW -->|"analyze, visualization"| IMG_PROC
+    API_GW -->|"user, scans"| USER_SVC
 
     %% Service Dependencies
     USER_SVC --> MYSQL
@@ -62,7 +62,7 @@ graph TB
     IMG_PROC --> RESULTS
 
     %% External Connections
-    DICOM -.->|Future| API_GW
+    DICOM -.->|"Future Integration"| API_GW
 
     %% Docker Network
     subgraph "Docker Network: met-network"
@@ -113,21 +113,21 @@ sequenceDiagram
 
     %% File Upload & Processing Flow
     U->>F: Upload Brain MRI
-    F->>G: POST /upload (NIfTI file)
+    F->>G: POST /upload with NIfTI file
     G->>G: Preprocess NIfTI
-    G->>M: POST /predict (processed data)
+    G->>M: POST /predict with processed data
     M->>M: Load AI Model
     M->>M: Run UNETR Segmentation
     M-->>G: Prediction Results
-    G->>A: POST /scans (save metadata)
+    G->>A: POST /scans save metadata
     A->>D: Store Scan Record
     G-->>F: Job ID & Status
     F-->>U: Upload Success
 
     %% Analysis & Visualization Flow
     U->>F: Request Analysis
-    F->>G: GET /results/{job_id}
-    G->>I: GET /analyze/{job_id}
+    F->>G: GET /results/job_id
+    G->>I: GET /analyze/job_id
     I->>I: Load Prediction Results
     I->>I: Calculate Volumes & Metrics
     I->>I: Generate 3D Visualizations
@@ -137,9 +137,9 @@ sequenceDiagram
 
     %% Data Export Flow
     U->>F: Export Results
-    F->>G: GET /export/{format}/{job_id}
-    G->>I: GET /export/{job_id}
-    I->>I: Generate Export (CSV/PDF)
+    F->>G: GET /export/format/job_id
+    G->>I: GET /export/job_id
+    I->>I: Generate Export CSV/PDF
     I-->>G: Export File
     G-->>F: Download File
     F-->>U: File Downloaded
@@ -151,7 +151,7 @@ sequenceDiagram
 flowchart LR
     subgraph "Input Data"
         NIFTI[NIfTI Files<br/>T1CE MRI Scans]
-        DICOM_F[DICOM<br/>(Future)]
+        DICOM_F["DICOM<br/>Future Support"]
     end
 
     subgraph "Data Processing Pipeline"
@@ -169,7 +169,7 @@ flowchart LR
     subgraph "Output & Storage"
         WEB_UI[Web Interface<br/>Interactive Viewer]
         REPORTS[Reports<br/>CSV, PDF Export]
-        DATABASE[(Database Storage<br/>Metadata & History)]
+        DATABASE[("Database Storage<br/>Metadata & History")]
     end
 
     NIFTI --> PREPROC
